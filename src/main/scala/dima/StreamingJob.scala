@@ -18,7 +18,24 @@
 
 package dima
 
+import org.apache.flink.api.common.io.FileInputFormat
 import org.apache.flink.streaming.api.scala._
+import org.apache.flink.streaming.api.scala.extensions._
+import org.apache.flink.ml.math.{DenseMatrix, DenseVector}
+import org.apache.flink.api.common.typeinfo.TypeInformation
+import org.apache.flink.api.java.ExecutionEnvironment
+import org.apache.flink.api.java.io.TupleCsvInputFormat
+import org.apache.flink.api.java.tuple.Tuple
+import org.apache.flink.api.java.typeutils.TupleTypeInfo
+import org.apache.flink.api.scala.DataSet
+import org.apache.flink.core.fs.Path
+import org.apache.flink.streaming.api.scala.function.{RichWindowFunction, WindowFunction}
+import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows
+import org.apache.flink.streaming.api.windowing.time.Time
+import org.apache.flink.streaming.api.windowing.windows.TimeWindow
+import org.apache.flink.util.Collector
+import org.joda.time.DateTime
+import org.joda.time.format.{DateTimeFormat, DateTimeFormatter}
 
 /**
  * Skeleton for a Flink Streaming Job.
@@ -33,31 +50,62 @@ import org.apache.flink.streaming.api.scala._
  * method, change the respective entry in the POM.xml file (simply search for 'mainClass').
  */
 object StreamingJob {
-  def main(args: Array[String]) {
-    // set up the streaming execution environment
-    val env = StreamExecutionEnvironment.getExecutionEnvironment
+  type OUT = (String, Int, Int, Int)
+  val Rank = 100
 
+  def main(args: Array[String]) {
+    val streamingEnv = StreamExecutionEnvironment.getExecutionEnvironment
+    val env = ExecutionEnvironment.getExecutionEnvironment
+    val formatter = DateTimeFormat.forPattern("dd/MM/yyyy HH:mm:ss")
     /*
-     * Here, you can start creating your execution plan for Flink.
-     *
-     * Start with getting some data from the environment, like
-     *  env.readTextFile(textPath);
-     *
-     * then, transform the resulting DataStream[String] using operations
-     * like
-     *   .filter()
-     *   .flatMap()
-     *   .join()
-     *   .group()
-     *
-     * and many more.
-     * Have a look at the programming guide:
-     *
-     * http://flink.apache.org/docs/latest/apis/streaming/index.html
-     *
+     * TODO: assign timestamps.
      */
+    val ratingStream = streamingEnv.readFile(getFileFormat("~/Documents/de/train_de.csv"), "~/Documents/de/train_de.csv")
+      .mapWith {
+        case (date, uid, iid, rating) => (formatter.parseDateTime(date), uid, iid, rating)
+      }
+      .keyBy(1, 2)
+      .window(TumblingEventTimeWindows.of(Time.seconds(5)))
+      .apply(new GradientDescentFunction())
+
+    // Set a big window on a stream in order to obtain max user/item ids (under assumption that they will show up during
+    // this window.
+//    val initialRead = ratingStream.window(TumblingEventTimeWindows.of(Time.seconds(5)))
+//    val maxUid = initialRead.maxBy(1).mapWith { case (_, uid, _, _) => uid } /* I would like to get a single value from a stream*/
+
+    val maxId = getMaxId(env)
+
+    // User factor matrix.
+    var w: DenseMatrix = DenseMatrix.zeros(maxId._1, Rank)
+
+    // Item factor matrix.
+    var h: DenseMatrix = DenseMatrix.zeros(Rank, maxId._2)
 
     // execute program
-    env.execute("Flink Streaming Scala API Skeleton")
+    streamingEnv.execute("Flink Streaming Scala API Skeleton")
+  }
+
+  def getFileFormat(path: String): FileInputFormat[OUT] = {
+    val typeInfo: TypeInformation[OUT] = createTypeInformation[OUT]
+    val tupleInfo = new TupleTypeInfo[OUT](typeInfo.getTypeClass, tupleInfo)
+    val fileFormat = new TupleCsvInputFormat[OUT](new Path(path), tupleInfo)
+    fileFormat
+  }
+
+  def getMaxId(env: ExecutionEnvironment): (Int, Int) = {
+    val ratingData = env.readCsvFile("~/Documents/de/train_de.csv")
+      .types(classOf[String], classOf[Int], classOf[Int], classOf[Int])
+    val maxUid = ratingData.max(1).collect().get(0).f1
+    val maxIid = ratingData.max(2).collect().get(0).f2
+    (maxUid, maxIid)
+  }
+
+  class GradientDescentFunction extends RichWindowFunction[OUT, OUT, Tuple, TimeWindow] {
+    override def apply(key: Tuple, window: TimeWindow, input: Iterable[(String, Int, Int, Int)],
+                       out: Collector[(String, Int, Int, Int)]): Unit = {
+      
+    }
   }
 }
+//  KeyedStream[(DateTime, Int, Int, Int), Tuple]
+//  WindowedStream[(DateTime, Int, Int, Int), Tuple, TimeWindow]
