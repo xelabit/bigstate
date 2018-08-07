@@ -18,7 +18,12 @@
 
 package dima
 
+import java.lang
+import java.util.Map
+
+import org.apache.flink.api.common.functions.{RichFlatMapFunction, RichMapFunction}
 import org.apache.flink.api.common.io.FileInputFormat
+import org.apache.flink.api.common.state.MapState
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.scala.extensions._
 import org.apache.flink.ml.math.{DenseMatrix, DenseVector}
@@ -37,6 +42,9 @@ import org.apache.flink.util.Collector
 import org.joda.time.DateTime
 import org.joda.time.format.{DateTimeFormat, DateTimeFormatter}
 
+import scala.collection.mutable
+import scala.collection.JavaConverters._
+
 /**
  * Skeleton for a Flink Streaming Job.
  *
@@ -50,62 +58,62 @@ import org.joda.time.format.{DateTimeFormat, DateTimeFormatter}
  * method, change the respective entry in the POM.xml file (simply search for 'mainClass').
  */
 object StreamingJob {
-  type OUT = (String, Int, Int, Int)
+  type OUT = (DateTime, Int, Int, Int)
   val Rank = 100
 
   def main(args: Array[String]) {
     val streamingEnv = StreamExecutionEnvironment.getExecutionEnvironment
-    val env = ExecutionEnvironment.getExecutionEnvironment
     val formatter = DateTimeFormat.forPattern("dd/MM/yyyy HH:mm:ss")
+    val data = streamingEnv.readTextFile("~/Documents/de/train_de.csv")
     /*
      * TODO: assign timestamps.
      */
-    val ratingStream = streamingEnv.readFile(getFileFormat("~/Documents/de/train_de.csv"), "~/Documents/de/train_de.csv")
-      .mapWith {
-        case (date, uid, iid, rating) => (formatter.parseDateTime(date), uid, iid, rating)
-      }
+    val ratingStream = data
+      .flatMap(new RichFlatMapFunction[String, OUT] {
+
+        override def flatMap(in: String, collector: Collector[OUT]): Unit = {
+          val tuple = in.split(",")
+          val result = (formatter.parseDateTime(tuple(0)), tuple(1).toInt, tuple(2).toInt, tuple(3).toInt)
+          collector.collect(result)
+        }
+      })
       .keyBy(1, 2)
       .window(TumblingEventTimeWindows.of(Time.seconds(5)))
       .apply(new GradientDescentFunction())
-
-    // Set a big window on a stream in order to obtain max user/item ids (under assumption that they will show up during
-    // this window.
-//    val initialRead = ratingStream.window(TumblingEventTimeWindows.of(Time.seconds(5)))
-//    val maxUid = initialRead.maxBy(1).mapWith { case (_, uid, _, _) => uid } /* I would like to get a single value from a stream*/
-
-    val maxId = getMaxId(env)
-
-    // User factor matrix.
-    var w: DenseMatrix = DenseMatrix.zeros(maxId._1, Rank)
-
-    // Item factor matrix.
-    var h: DenseMatrix = DenseMatrix.zeros(Rank, maxId._2)
 
     // execute program
     streamingEnv.execute("Flink Streaming Scala API Skeleton")
   }
 
-  def getFileFormat(path: String): FileInputFormat[OUT] = {
-    val typeInfo: TypeInformation[OUT] = createTypeInformation[OUT]
-    val tupleInfo = new TupleTypeInfo[OUT](typeInfo.getTypeClass, tupleInfo)
-    val fileFormat = new TupleCsvInputFormat[OUT](new Path(path), tupleInfo)
-    fileFormat
-  }
-
-  def getMaxId(env: ExecutionEnvironment): (Int, Int) = {
-    val ratingData = env.readCsvFile("~/Documents/de/train_de.csv")
-      .types(classOf[String], classOf[Int], classOf[Int], classOf[Int])
-    val maxUid = ratingData.max(1).collect().get(0).f1
-    val maxIid = ratingData.max(2).collect().get(0).f2
-    (maxUid, maxIid)
-  }
-
   class GradientDescentFunction extends RichWindowFunction[OUT, OUT, Tuple, TimeWindow] {
-    override def apply(key: Tuple, window: TimeWindow, input: Iterable[(String, Int, Int, Int)],
-                       out: Collector[(String, Int, Int, Int)]): Unit = {
-      
+    private var w: MapState[Int, DenseVector] = _
+    private var h: MapState[Int, DenseVector] = _
+
+    // Number of users.
+    val n = 100000
+
+    // Number of items.
+    val m = 100000
+
+    def initFactorMatrix(map: lang.Iterable[Map.Entry[Int, DenseVector]],
+                         size: Int): lang.Iterable[Map.Entry[Int, DenseVector]] = {
+      if (map != null) {
+        map
+      } else {
+        val scalaMap = collection.mutable.Map[Int, DenseVector]()
+        for (i <- 0 until size) yield (scalaMap.put(i, DenseVector.zeros(Rank)))
+        val javaMap = scalaMap.map { case (k, v) => k -> v }.asJava
+        val newMap: MapState[Int, DenseVector] = null
+        newMap.putAll(javaMap)
+        newMap.entries()
+      }
+    }
+
+    override def apply(key: Tuple, window: TimeWindow, input: Iterable[OUT], out: Collector[OUT]): Unit = {
+      val tmpCurrentW = w.entries()
+      val tmpCurrentH = h.entries()
+      val currentW = initFactorMatrix(tmpCurrentW, n)
+      val currentH = initFactorMatrix(tmpCurrentH, m)
     }
   }
 }
-//  KeyedStream[(DateTime, Int, Int, Int), Tuple]
-//  WindowedStream[(DateTime, Int, Int, Int), Tuple, TimeWindow]
