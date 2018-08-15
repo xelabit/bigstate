@@ -65,9 +65,8 @@ object StreamingJob {
     val streamingEnv = StreamExecutionEnvironment.getExecutionEnvironment
     val formatter = DateTimeFormat.forPattern("dd/MM/yyyy HH:mm:ss")
     val data = streamingEnv.readTextFile("~/Documents/de/train_de.csv")
-    /*
-     * TODO: assign timestamps.
-     */
+
+    // TODO: assign timestamps.
     val ratingStream = data
       .flatMap(new RichFlatMapFunction[String, OUT] {
 
