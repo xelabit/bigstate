@@ -4,6 +4,8 @@ import scala.collection.mutable
 
 trait WorkerLogic[T, P, WOut] extends Serializable {
 
+  def open(): Unit = {}
+
   def onRecv(data: T, ps: ParameterServerClient[P, WOut]): Unit
 
   def onPullRecv(paramId: Int, paramValue: P, ps: ParameterServerClient[P, WOut]): Unit

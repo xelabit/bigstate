@@ -1,13 +1,18 @@
 package dima
 
-import org.apache.flink.api.common.functions.RuntimeContext
+import org.apache.flink.api.common.functions.{Partitioner, RichFlatMapFunction, RuntimeContext}
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.configuration.Configuration
-import org.apache.flink.streaming.api.scala.DataStream
+import org.apache.flink.streaming.api.functions.co.RichCoFlatMapFunction
+import org.apache.flink.streaming.api.scala.{ConnectedStreams, DataStream}
+import org.apache.flink.util.Collector
+import org.slf4j.LoggerFactory
 
 class FlinkParameterServer
 
 object FlinkParameterServer {
+  private val log = LoggerFactory.getLogger(classOf[FlinkParameterServer])
+
   def transform[T, P, PSOut, WOut](trainingData: DataStream[T], workerLogic: WorkerLogic[T, P, WOut],
                                    psLogic: ParameterServerLogic[P, PSOut], workerParallelism: Int, psParallelism: Int,
                                    iterationWaitTime: Long)(implicit tiT: TypeInformation[T], tiP: TypeInformation[P],
@@ -25,8 +30,8 @@ object FlinkParameterServer {
       case PSToWorker(workerPartitionIndex, _) => workerPartitionIndex
     }
     transform[T, P, PSOut, WOut, PSToWorker[P], WorkerToPS[P]](trainingData, workerLogic, psLogic, workerToPSPartitioner,
-      psToWorkerPartitioner, workerParallelism, psParallelism, new SimpleWorkerReceiver[P], new SimpleWorkerSender[P],
-      new SimplePSReceiver[P], new SimplePSSender[P], iterationWaitTime)
+      psToWorkerPartitioner, workerParallelism, psParallelism, new SimpleWorkerReceiver[P],
+      new SimpleWorkerSender[P], new SimplePSReceiver[P], new SimplePSSender[P], iterationWaitTime)
   }
 
   def transform[T, P, PSOut, WOut, PStoWorker, WorkerToPS](trainingData: DataStream[T],
@@ -65,6 +70,7 @@ object FlinkParameterServer {
 
 
             override def open(parameters: Configuration): Unit = {
+              logic.open()
               psClient.setPartitionId(getRuntimeContext.getIndexOfThisSubtask)
             }
 
@@ -169,6 +175,39 @@ object FlinkParameterServer {
       .setParallelism(workerParallelism)
       .iterate((x: ConnectedStreams[T, PStoWorker]) => stepFunc(x), iterationWaitTime)
   }
+
+  private class MessagingPS[WorkerIn, WorkerOut, P, PSOut](psSender: PSSender[WorkerIn, P])
+    extends ParameterServer[P, PSOut] {
+
+    private var collector: Collector[Either[WorkerIn, PSOut]] = _
+
+    def setCollector(out: Collector[Either[WorkerIn, PSOut]]): Unit = collector = out
+
+    def collectAnswerMsg(msg: WorkerIn): Unit = collector.collect(Left(msg))
+
+    override def answerPull(id: Int, value: P, workerPartitionIndex: Int): Unit = {
+      psSender.onPullAnswer(id, value, workerPartitionIndex, collectAnswerMsg)
+    }
+
+    override def output(out: PSOut): Unit = collector.collect(Right(out))
+  }
+
+  private class MessagingPSClient[IN, OUT, P, WOut](sender: WorkerSender[OUT, P]) extends ParameterServerClient[P, WOut] {
+    private var collector: Collector[Either[OUT, WOut]] = _
+    private var partitionId: Int = -1
+
+    def setPartitionId(pId: Int): Unit = partitionId = pId
+
+    def setCollector(out: Collector[Either[OUT, WOut]]): Unit = collector = out
+
+    def collectPullMsg(msg: OUT): Unit = collector.collect(Left(msg))
+
+    override def pull(id: Int): Unit = sender.onPull(id, collectPullMsg, partitionId)
+
+    override def push(id: Int, deltaUpdate: P): Unit = sender.onPush(id, deltaUpdate, collectPullMsg, partitionId)
+
+    override def output(out: WOut): Unit = collector.collect(Right(out))
+  }
 }
 
 trait ParameterServerLogic[P, PSOut] extends Serializable {
@@ -187,4 +226,26 @@ trait ParameterServer[P, PSOut] extends Serializable {
   def answerPull(id: Int, value: P, workerPartitionIndex: Int): Unit
 
   def output(out: PSOut): Unit
+}
+
+trait PSReceiver[WorkerToPS, P] extends Serializable {
+
+  def onWorkerMsg(msg: WorkerToPS, onPullRecv: (Int, Int) => Unit, onPushRecv: (Int, P) => Unit)
+}
+
+trait PSSender[PStoWorker, P] extends Serializable {
+
+  def onPullAnswer(id: Int, value: P, workerPartitionIndex: Int, collectAnswerMsg: PStoWorker => Unit)
+}
+
+trait WorkerReceiver[PStoWorker, P] extends Serializable {
+
+  def onPullAnswerRecv(msg: PStoWorker, pullHandler: PullAnswer[P] => Unit)
+}
+
+trait WorkerSender[WorkerToPS, P] extends Serializable {
+
+  def onPull(id: Int, collectAnswerMsg: WorkerToPS => Unit, partitionId: Int)
+
+  def onPush(id: Int, deltaUpdate: P, collectAnswerMsg: WorkerToPS => Unit, partitionId: Int)
 }
