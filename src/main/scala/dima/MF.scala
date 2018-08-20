@@ -1,8 +1,13 @@
-import dima.{Rating, StepSize}
+import dima.Utils.{ItemId, UserId}
+import dima.{PSOnlineMatrixFactorization, Rating, StepSize}
+import dima.Vector._
 import org.apache.flink.api.common.functions.RichFlatMapFunction
+import org.apache.flink.streaming.api.functions.sink.RichSinkFunction
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.util.Collector
 import org.joda.time.format.DateTimeFormat
+
+import scala.collection.mutable
 
 class MF {
 
@@ -25,6 +30,7 @@ object MF {
    */
   val stepSize = new StepSize(workerParallelism)
   val learningRates = stepSize.makeInitialSeq()
+  val learningRate = 0.01
   val pullLimit = 1500
   val iterationWaitTime = 10000
 
@@ -46,5 +52,28 @@ object MF {
     })
 
     // TODO: before calling psOnlineMF, a keyed stream should be created.
+    PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate, pullLimit,
+      workerParallelism, psParallelism, iterationWaitTime)
+      .addSink(new RichSinkFunction[Either[(UserId, Vector), (ItemId, Vector)]] {
+        val userVectors = new mutable.HashMap[UserId, Vector]
+        val itemVectors = new mutable.HashMap[ItemId, Vector]
+
+        override def invoke(value: Either[(UserId, Vector), (ItemId, Vector)]): Unit = {
+          value match {
+            case Left((userId, vec)) => userVectors.update(userId, vec)
+            case Right((itemId, vec)) => itemVectors.update(itemId, vec)
+          }
+        }
+
+        override def close(): Unit = {
+          val userVectorFile = new java.io.PrintWriter(new java.io.File(userVector_output_name))
+          for ((k, v) <- userVectors) for (value <- v) userVectorFile.write(k + ";" + value + '\n')
+          userVectorFile.close()
+          val itemVectorFile = new java.io.PrintWriter(new java.io.File(itemVector_output_name))
+          for ((k, v) <- itemVectors) for (value <- v) itemVectorFile.write(k + ";" + value + '\n')
+          itemVectorFile.close()
+        }
+      }).setParallelism(1)
+    env.execute()
   }
 }

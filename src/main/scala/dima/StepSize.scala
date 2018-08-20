@@ -29,7 +29,13 @@ class StepSize(val d: Int) {
     lrs.map(_ * learningRate)
   }
 
+  /**
+    * Increases current learning rate.
+    */
   def incBoldDriver(): Unit = learningRate += learningRate * 0.05
 
+  /**
+    * Decreases current learning rate.
+    */
   def decBoldDriver(): Unit = learningRate -= learningRate * 0.5
 }

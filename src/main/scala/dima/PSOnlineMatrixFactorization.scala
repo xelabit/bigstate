@@ -26,5 +26,6 @@ object PSOnlineMatrixFactorization {
     }, x => x.user)
     val modelUpdates = FlinkParameterServer.transform(partitionedInput, workerLogic, serverLogic, workerParallelism,
       psParallelism, iterationWaitTime)
+    modelUpdates
   }
 }

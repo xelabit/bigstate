@@ -4,7 +4,7 @@ import org.apache.flink.api.common.functions.{Partitioner, RichFlatMapFunction, 
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.streaming.api.functions.co.RichCoFlatMapFunction
-import org.apache.flink.streaming.api.scala.{ConnectedStreams, DataStream}
+import org.apache.flink.streaming.api.scala._
 import org.apache.flink.util.Collector
 import org.slf4j.LoggerFactory
 
@@ -38,17 +38,13 @@ object FlinkParameterServer {
                                                            workerLogic: WorkerLogic[T, P, WOut],
                                                            psLogic: ParameterServerLogic[P, PSOut],
                                                            paramPartitioner: WorkerToPS => Int,
-                                                           wInPartition: PStoWorker => Int,
-                                                           workerParallelism: Int,
+                                                           wInPartition: PStoWorker => Int, workerParallelism: Int,
                                                            psParallelism: Int,
                                                            workerReceiver: WorkerReceiver[PStoWorker, P],
                                                            workerSender: WorkerSender[WorkerToPS, P],
                                                            psReceiver: PSReceiver[WorkerToPS, P],
-                                                           psSender: PSSender[PStoWorker, P],
-                                                           iterationWaitTime: Long)
-                                                          (implicit
-                                                           tiT: TypeInformation[T],
-                                                           tiP: TypeInformation[P],
+                                                           psSender: PSSender[PStoWorker, P], iterationWaitTime: Long)
+                                                          (implicit tiT: TypeInformation[T], tiP: TypeInformation[P],
                                                            tiPSOut: TypeInformation[PSOut],
                                                            tiWOut: TypeInformation[WOut],
                                                            tiWorkerIn: TypeInformation[PStoWorker],
@@ -56,18 +52,13 @@ object FlinkParameterServer {
                                                           ): DataStream[Either[WOut, PSOut]] = {
     def stepFunc(workerIn: ConnectedStreams[T, PStoWorker]):
     (DataStream[PStoWorker], DataStream[Either[WOut, PSOut]]) = {
-
       val worker = workerIn
         .flatMap(
           new RichCoFlatMapFunction[T, PStoWorker, Either[WorkerToPS, WOut]] {
-
             val receiver: WorkerReceiver[PStoWorker, P] = workerReceiver
             val sender: WorkerSender[WorkerToPS, P] = workerSender
             val logic: WorkerLogic[T, P, WOut] = workerLogic
-
-            val psClient =
-              new MessagingPSClient[PStoWorker, WorkerToPS, P, WOut](sender)
-
+            val psClient = new MessagingPSClient[PStoWorker, WorkerToPS, P, WOut](sender)
 
             override def open(parameters: Configuration): Unit = {
               logic.open()
@@ -77,7 +68,6 @@ object FlinkParameterServer {
             // incoming answer from PS
             override def flatMap2(msg: PStoWorker, out: Collector[Either[WorkerToPS, WOut]]): Unit = {
               log.debug(s"Pull answer: $msg")
-
               psClient.setCollector(out)
               receiver.onPullAnswerRecv(msg, {
                 case PullAnswer(id, value) => logic.onPullRecv(id, value, psClient)
@@ -87,7 +77,6 @@ object FlinkParameterServer {
             // incoming data
             override def flatMap1(data: T, out: Collector[Either[WorkerToPS, WOut]]): Unit = {
               log.debug(s"Incoming data: $data")
-
               psClient.setCollector(out)
               logic.onRecv(data, psClient)
             }
@@ -98,36 +87,31 @@ object FlinkParameterServer {
           }
         )
         .setParallelism(workerParallelism)
-
       val wOut = worker.flatMap(x => x match {
         case Right(out) => Some(out)
         case _ => None
       }).setParallelism(workerParallelism)
-
       val ps = worker
         .flatMap(x => x match {
           case Left(workerOut) => Some(workerOut)
           case _ => None
         }).setParallelism(workerParallelism)
         .partitionCustom(new Partitioner[Int]() {
-          override def partition(key: Int, numPartitions: Int): Int = {
-            key % numPartitions
-          }
+
+          override def partition(key: Int, numPartitions: Int): Int = key % numPartitions
         }, paramPartitioner)
         .flatMap(new RichFlatMapFunction[WorkerToPS, Either[PStoWorker, PSOut]] {
-
           val logic: ParameterServerLogic[P, PSOut] = psLogic
           val receiver: PSReceiver[WorkerToPS, P] = psReceiver
           val sender: PSSender[PStoWorker, P] = psSender
-
           val ps = new MessagingPS[PStoWorker, WorkerToPS, P, PSOut](sender)
 
           override def flatMap(msg: WorkerToPS, out: Collector[Either[PStoWorker, PSOut]]): Unit = {
             log.debug(s"Pull request or push msg @ PS: $msg")
-
             ps.setCollector(out)
             receiver.onWorkerMsg(msg,
-              (pullId, workerPartitionIndex) => logic.onPullRecv(pullId, workerPartitionIndex, ps), { case (pushId, deltaUpdate) => logic.onPushRecv(pushId, deltaUpdate, ps) }
+              (pullId, workerPartitionIndex) => logic.onPullRecv(pullId, workerPartitionIndex, ps),
+              { case (pushId, deltaUpdate) => logic.onPushRecv(pushId, deltaUpdate, ps) }
             )
           }
 
@@ -139,37 +123,30 @@ object FlinkParameterServer {
             logic.open(parameters: Configuration, getRuntimeContext: RuntimeContext)
         })
         .setParallelism(psParallelism)
-
       val psToWorker = ps
         .flatMap(_ match {
           case Left(x) => Some(x)
           case _ => None
         })
         .setParallelism(psParallelism)
+
         // TODO avoid this empty map?
         .map(x => x).setParallelism(workerParallelism)
         .partitionCustom(new Partitioner[Int]() {
+
           override def partition(key: Int, numPartitions: Int): Int = {
-            if (0 <= key && key < numPartitions) {
-              key
-            } else {
-              throw new RuntimeException("Pull answer key should be the partition ID itself!")
-            }
+            if (0 <= key && key < numPartitions) key
+            else throw new RuntimeException("Pull answer key should be the partition ID itself!")
           }
         }, wInPartition)
-
       val psToOut = ps.flatMap(_ match {
         case Right(x) => Some(x)
         case _ => None
-      })
-        .setParallelism(psParallelism)
-
+      }).setParallelism(psParallelism)
       val wOutEither: DataStream[Either[WOut, PSOut]] = wOut.forward.map(x => Left(x))
       val psOutEither: DataStream[Either[WOut, PSOut]] = psToOut.forward.map(x => Right(x))
-
       (psToWorker, wOutEither.setParallelism(workerParallelism).union(psOutEither.setParallelism(psParallelism)))
     }
-
     trainingData
       .map(x => x)
       .setParallelism(workerParallelism)
