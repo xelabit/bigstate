@@ -17,9 +17,10 @@ object PSOnlineMatrixFactorization {
                  iterationWaitTime: Long = 10000): DataStream[Either[(UserId, Vector), (ItemId, Vector)]] = {
     val factorInitDesc = RangedRandomFactorInitializerDescriptor(numFactors, rangeMin, rangeMax)
     val workerLogicBase = new PSOnlineMatrixFactorizationWorker(numFactors, rangeMin, rangeMax, learningRate)
-    val workerLogic: WorkerLogic[Rating, Vector, (UserId, Vector)] = WorkerLogic.addPullLimiter(workerLogicBase, pullLimit)
+    val workerLogic: WorkerLogic[Rating, Vector, (UserId, Vector)] =
+      WorkerLogic.addPullLimiter(workerLogicBase, pullLimit)
     val serverLogic = new SimplePSLogic[Array[Double]](
-      x => factorInitDesc.open().nextFactor(x), { (vec, deltaVec) => vectorSum(vec, deltaVec)}
+      x => factorInitDesc.open().nextFactor(x), { (vec, deltaVec) => vectorSum(vec, deltaVec) }
     )
     val partitionedInput = src.partitionCustom(new Partitioner[Int] {
       override def partition(key: UserId, numPartitions: Int): ItemId = { key % numPartitions }

@@ -2,8 +2,11 @@ import dima.Utils.{ItemId, UserId}
 import dima.{PSOnlineMatrixFactorization, Rating, StepSize}
 import dima.Vector._
 import org.apache.flink.api.common.functions.RichFlatMapFunction
+import org.apache.flink.streaming.api.TimeCharacteristic
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction
 import org.apache.flink.streaming.api.scala._
+import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows
+import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.util.Collector
 import org.joda.time.format.DateTimeFormat
 
@@ -39,6 +42,7 @@ object MF {
     val userVector_output_name = args(1)
     val itemVector_output_name = args(2)
     val env = StreamExecutionEnvironment.getExecutionEnvironment
+    env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
     val data = env.readTextFile(input_file_name)
     val formatter = DateTimeFormat.forPattern("dd/MM/yyyy HH:mm:ss")
     val lastFM = data.flatMap(new RichFlatMapFunction[String, Rating] {
@@ -50,6 +54,9 @@ object MF {
         out.collect(r)
       }
     })
+      .assignAscendingTimestamps(_.timestamp.getMillis)
+      .keyBy(_.user)
+      .window(TumblingEventTimeWindows.of(Time.days(1)))
 
     // TODO: before calling psOnlineMF, a keyed stream should be created.
     PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate, pullLimit,
