@@ -5,6 +5,7 @@ import org.apache.flink.api.common.functions.RichFlatMapFunction
 import org.apache.flink.streaming.api.TimeCharacteristic
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction
 import org.apache.flink.streaming.api.scala._
+import org.apache.flink.streaming.api.scala.function.ProcessWindowFunction
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.util.Collector
@@ -57,6 +58,7 @@ object MF {
       .assignAscendingTimestamps(_.timestamp.getMillis)
       .keyBy(_.user)
       .window(TumblingEventTimeWindows.of(Time.days(1)))
+      .process(new DSGD)
 
     // TODO: before calling psOnlineMF, a keyed stream should be created.
     PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate, pullLimit,
@@ -84,3 +86,5 @@ object MF {
     env.execute()
   }
 }
+
+class DSGD extends
