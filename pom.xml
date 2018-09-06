@@ -94,6 +94,11 @@ under the License.
 			<artifactId>nscala-time_2.11</artifactId>
 			<version>2.20.0</version>
 		</dependency>
+		<dependency>
+			<groupId>org.scalanlp</groupId>
+			<artifactId>breeze_2.10</artifactId> <!-- or 2.11 -->
+			<version>0.13.2</version>
+		</dependency>
 
 		<!-- Add logging framework, to produce console output when running in the IDE. -->
 		<!-- These dependencies are excluded from the application JAR by default. -->

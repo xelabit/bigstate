@@ -25,7 +25,7 @@ class StepSize(val d: Int) {
     * @return a sequence of learning rates.
     */
   def getLearningRatesForNextEpoch(): Seq[Double] = {
-    val lrs = (0.5 to 2 by ((2 - 0.5) / (d - 1))).toSeq
+    val lrs = 0.5 to 2 by ((2 - 0.5) / (d - 1))
     lrs.map(_ * learningRate)
   }
 

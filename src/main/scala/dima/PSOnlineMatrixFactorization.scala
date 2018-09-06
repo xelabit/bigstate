@@ -13,7 +13,7 @@ class PSOnlineMatrixFactorization {
 object PSOnlineMatrixFactorization {
 
   // TODO: DataStream -> KeyedStream
-  def psOnlineMF(src: WindowedStream[Rating, Utils.UserId, TimeWindow], numFactors: Int = 10, rangeMin: Double = -0.01,
+  def psOnlineMF(src: DataStream[Rating], numFactors: Int = 10, rangeMin: Double = -0.01,
                  rangeMax: Double = 0.01, learningRate: Double, pullLimit: Int = 1600, workerParallelism: Int,
                  psParallelism: Int, iterationWaitTime: Long = 10000
                 ): DataStream[Either[(UserId, Vector), (ItemId, Vector)]] = {
