@@ -1,5 +1,8 @@
+import MF._
+import breeze.linalg.{DenseMatrix, DenseVector}
+import breeze.numerics.pow
 import dima.Utils.{ItemId, UserId}
-import dima.{PSOnlineMatrixFactorization, Rating, StepSize}
+import dima.{PSOnlineMatrixFactorization, Rating, SGDUpdater, StepSize, Utils}
 import dima.Vector._
 import org.apache.flink.api.common.functions.{RichFilterFunction, RichFlatMapFunction}
 import org.apache.flink.api.common.state.{MapState, MapStateDescriptor}
@@ -16,6 +19,7 @@ import org.apache.flink.util.Collector
 import org.joda.time.format.DateTimeFormat
 
 import scala.collection.mutable
+import scala.collection.JavaConverters._
 import scala.util.Random
 import scala.util.control.Breaks._
 
@@ -35,7 +39,7 @@ object MF {
   val psParallelism = 2
 
   /*
-  TODO: according to DSGD this should be different for each epoch. ε0 is chosen among 1, 1/2, 1/4, ..., 1/2^(d-1), d is
+  According to DSGD this should be different for each epoch. ε0 is chosen among 1, 1/2, 1/4, ..., 1/2^(d-1), d is
   the number of worker nodes. Each of this value is tried in parallel (on a small subset of matrix V (~0.1%). The one
   which yields the smallest loss is chosen as ε0. If a loss decreased in the current epoch, in the next one we choose
   again in parallel among [1/2, 2] multiplied by the current learning rate. If the loss after the epoch has increased,
@@ -43,7 +47,7 @@ object MF {
   decrease the step size by 50% if the loss increases.
    */
   val stepSize = new StepSize(workerParallelism)
-  val learningRates: Seq[Double] = stepSize.makeInitialSeq()
+  var learningRates: Seq[Double] = stepSize.makeInitialSeq()
   val learningRate = 0.01
   val pullLimit = 1500
   val iterationWaitTime = 10000
@@ -108,30 +112,6 @@ object MF {
       .keyBy(_.key)
       .window(TumblingEventTimeWindows.of(Time.days(1)))
       .process(new DSGD())
-
-    // TODO: before calling psOnlineMF, a keyed stream should be created.
-    PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate, pullLimit,
-      workerParallelism, psParallelism, iterationWaitTime)
-      .addSink(new RichSinkFunction[Either[(UserId, Vector), (ItemId, Vector)]] {
-        val userVectors = new mutable.HashMap[UserId, Vector]
-        val itemVectors = new mutable.HashMap[ItemId, Vector]
-
-        override def invoke(value: Either[(UserId, Vector), (ItemId, Vector)]): Unit = {
-          value match {
-            case Left((userId, vec)) => userVectors.update(userId, vec)
-            case Right((itemId, vec)) => itemVectors.update(itemId, vec)
-          }
-        }
-
-        override def close(): Unit = {
-          val userVectorFile = new java.io.PrintWriter(new java.io.File(userVector_output_name))
-          for ((k, v) <- userVectors) for (value <- v) userVectorFile.write(k + ";" + value + '\n')
-          userVectorFile.close()
-          val itemVectorFile = new java.io.PrintWriter(new java.io.File(itemVector_output_name))
-          for ((k, v) <- itemVectors) for (value <- v) itemVectorFile.write(k + ";" + value + '\n')
-          itemVectorFile.close()
-        }
-      }).setParallelism(1)
     env.execute()
   }
 }
@@ -177,20 +157,95 @@ class DSGD extends ProcessWindowFunction[Rating, Either[(UserId, Vector), (ItemI
     (uBlocks, iBlocks)
   }
 
+  /**
+    * Calculates losses for various learning rates.
+    * @param w a set of different user factor matrices, each corresponding to a different learning rate.
+    * @param h a set of different item factor matrices, each corresponding to a different learning rate.
+    * @param ratings true values from the initial matrix.
+    * @return a learning rate that resulted in a smallest loss.
+    */
+  def getBestLearningRate(w: Seq[mutable.HashMap[UserId, Vector]], h: Seq[mutable.HashMap[UserId, Vector]],
+                ratings: Iterator[Rating]): Double = {
+    val losses: Seq[Double] = Seq.empty
+    var minLoss = 1000.0
+    var bestLearningRate: Double = null
+
+    // Size is equal to a number of different learning rates that are being tested.
+    for (i <- w.size) {
+      val wMatrix = w(i)
+      val hMatrix = h(i)
+      losses(i) = getLoss(wMatrix, hMatrix, ratings)
+      if (losses(i) < minLoss) {
+        minLoss = losses(i)
+        bestLearningRate = MF.learningRates(i)
+      }
+    }
+    bestLearningRate
+  }
+
+  def getLoss(w: mutable.HashMap[UserId, Vector], h: mutable.HashMap[ItemId, Vector], ratings: Iterator[Rating]
+             ): Double = {
+    var loss = 0
+    while (ratings.hasNext) {
+      val rating = ratings.next()
+      val wFactor = new DenseVector(w(rating.user))
+      val hFactor = new DenseVector(h(rating.item))
+      loss += pow(rating.rating - (wFactor dot hFactor), 2)
+    }
+    loss
+  }
+
+  /**
+    * A function that takes a stream of ratings, performs gradient descent for factor matrices for each possible
+    * learning rate (defined in MF.learningRates) and outputs a stream either of updated user or item factor vectors.
+    * @param elements ratings in a current time window. We will sample from this data set.
+    */
+  def testLearningRatesOnSample(elements: Iterable[Rating]): Unit = {
+
+    // Select 0,01% of initial data at random in order to test various learning rates on it.
+    val sample = Random.shuffle(elements.toList).drop((elements.size * .999).toInt).iterator
+    val sgdUpdaters: Seq[SGDUpdater] = Seq.empty[SGDUpdater]
+    var k = 0
+    for (i <- MF.learningRates) {
+      sgdUpdaters(k) = new SGDUpdater(i)
+      k += 1
+    }
+    val userVectors = new mutable.HashMap[UserId, Vector]
+    val itemVectors = new mutable.HashMap[ItemId, Vector]
+    val wMaps: Seq[mutable.HashMap[UserId, Vector]] = Seq.empty
+    val hMaps: Seq[mutable.HashMap[UserId, Vector]] = Seq.empty
+
+    // Create hash maps (user/item factor matrices) for each learning rate.
+    for (i <- sgdUpdaters.indices) {
+      wMaps(i) = userVectors
+      hMaps(i) = itemVectors
+    }
+    for (rating <- sample) {
+      val out = MF.learningRates.map(x => (x, rating))
+      var k = 0
+      for (i <- out) {
+        var w: Vector = wMaps(k)(i._2.user)
+        var h: Vector = hMaps(k)(i._2.item)
+        (w, h) = sgdUpdaters(k).delta(i._2.rating, w, h, sample.size)
+        wMaps(k).update(i._2.user, w)
+        hMaps(k).update(i._2.item, h)
+        k += 1
+      }
+    }
+    stepSize.learningRate = getBestLearningRate(wMaps, hMaps, sample)
+  }
+
   override def process(key: Int, context: Context, elements: Iterable[Rating],
                        out: Collector[Either[(UserId, Vector), (ItemId, Vector)]]): Unit = {
     userState = context.globalState.getMapState(userStateDescriptor)
     itemState = context.globalState.getMapState(itemStateDescriptor)
-
-    // Select 0,01% of initial data at random in order to test various learning rates on it.
-    val sample = Random.shuffle(elements.toList).drop((elements.size * .999).toInt).iterator
-
-    // "Double" is a learning rate.
-    val sampleStream: DataStream[(Double, Rating)] = MF.env.fromCollection(sample)
-      .flatMap(new LearningRateFlatMapFunction)
-
-
+    testLearningRatesOnSample(elements)
     var hasConverged = false
+    var lastEpochLoss: Double = null
+    var isFirstEpoch = true
+    var isBoldDriver = false
+
+    // Epoch.
     while (!hasConverged) {
       val ratings = Random.shuffle(elements.toList).iterator
       val strategy = Random.nextInt(2)
@@ -202,11 +257,51 @@ class DSGD extends ProcessWindowFunction[Rating, Either[(UserId, Vector), (ItemI
         val substrategy = Random.shuffle(substrategies.toList).head
         substrategies.drop(1)
         val blocks = getStratum(strategy, substrategy)
-        val lastFM: DataStream[Rating] = MF.env.fromCollection(ratings)
-          .filter(new StratumFilterFunction(blocks))
+        val lastFM: DataStream[Rating] = MF.env.fromCollection(ratings).filter(new StratumFilterFunction(blocks))
 
+        // TODO: partitioner should be implemented correctly.
+        PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, stepSize.learningRate, pullLimit,
+          workerParallelism, psParallelism, iterationWaitTime)
+          .addSink(new RichSinkFunction[Either[(UserId, Vector), (ItemId, Vector)]] {
+            val userVectors = new mutable.HashMap[UserId, Vector]
+            val itemVectors = new mutable.HashMap[ItemId, Vector]
 
+            override def invoke(value: Either[(UserId, Vector), (ItemId, Vector)]): Unit = {
+              value match {
+                case Left((userId, vec)) => userVectors.update(userId, vec)
+                case Right((itemId, vec)) => itemVectors.update(itemId, vec)
+              }
+            }
+
+            override def close(): Unit = {
+              val javaUserMap = userVectors.map(x => x).asJava
+              val javaItemMap = itemVectors.map(x => x).asJava
+              userState.putAll(javaUserMap)
+              itemState.putAll(javaItemMap)
+            }
+          }).setParallelism(1)
       }
+
+      // Transform states into Scala maps in order to calculate the loss of this epoch.
+      val scalaUserMap: mutable.HashMap[UserId, Vector] = new mutable.HashMap[UserId, Vector]()
+      val scalaItemMap: mutable.HashMap[ItemId, Vector] = new mutable.HashMap[ItemId, Vector]()
+      userState.entries().forEach(kv => scalaUserMap.update(kv.getKey, kv.getValue))
+      itemState.entries().forEach(kv => scalaItemMap.update(kv.getKey, kv.getValue))
+      val epochLoss = getLoss(scalaUserMap, scalaItemMap, ratings)
+
+      // Decision for a new learning rate.
+      if (isFirstEpoch) isFirstEpoch = false
+      else if (!isBoldDriver) {
+        if (epochLoss < lastEpochLoss) {
+          MF.learningRates = stepSize.getLearningRatesForNextEpoch()
+          testLearningRatesOnSample(elements)
+        } else {
+          isBoldDriver = true
+          if (epochLoss < lastEpochLoss) stepSize.incBoldDriver()
+          else stepSize.decBoldDriver()
+        }
+      }
+      lastEpochLoss = epochLoss
     }
   }
 
@@ -218,6 +313,12 @@ class DSGD extends ProcessWindowFunction[Rating, Either[(UserId, Vector), (ItemI
   }
 }
 
+/**
+  * An operator that filters out tuples that do not belong to the stratum currently being processed.
+  * @param blocks a set of (user block, item block) tuples, each of which defines a rectangle block in the initial
+  *               matrix. Those blocks are called substratums and any record that belongs to them should be selected by
+  *               this function for further processing.
+  */
 class StratumFilterFunction(blocks: (Seq[Int], Seq[Int])) extends RichFilterFunction[Rating] {
 
   /**
@@ -234,12 +335,5 @@ class StratumFilterFunction(blocks: (Seq[Int], Seq[Int])) extends RichFilterFunc
       }
     }
     f
-  }
-}
-
-class LearningRateFlatMapFunction extends RichFlatMapFunction[Rating, (Double, Rating)] {
-  override def flatMap(in: Rating, collector: Collector[(Double, Rating)]): Unit = {
-    val out = MF.learningRates.map(x => (x, in))
-    for (i <- out.indices) collector.collect(out(i))
   }
 }
