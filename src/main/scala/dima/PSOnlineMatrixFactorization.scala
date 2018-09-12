@@ -3,7 +3,8 @@ package dima
 import dima.Utils.{ItemId, UserId}
 import dima.Vector._
 import org.apache.flink.api.common.functions.Partitioner
-import org.apache.flink.streaming.api.scala.{DataStream, WindowedStream}
+import org.apache.flink.api.common.typeinfo.TypeInformation
+import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow
 
 class PSOnlineMatrixFactorization {
@@ -24,9 +25,11 @@ object PSOnlineMatrixFactorization {
     val serverLogic = new SimplePSLogic[Array[Double]](
       x => factorInitDesc.open().nextFactor(x), { (vec, deltaVec) => vectorSum(vec, deltaVec) }
     )
+
+    // TODO: substitute with my partitioner.
     val partitionedInput = src.partitionCustom(new Partitioner[Int] {
-      override def partition(key: UserId, numPartitions: Int): ItemId = { key % numPartitions }
-    }, x => x.user)
+      override def partition(key: Int, numPartitions: Int): Int = { key }
+    }, x => x.key)
     val modelUpdates = FlinkParameterServer.transform(partitionedInput, workerLogic, serverLogic, workerParallelism,
       psParallelism, iterationWaitTime)
     modelUpdates

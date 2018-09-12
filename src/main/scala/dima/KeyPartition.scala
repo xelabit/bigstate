@@ -1,3 +1,5 @@
+package dima
+
 import org.apache.flink.api.common.functions.RichFlatMapFunction
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.scala.extensions._

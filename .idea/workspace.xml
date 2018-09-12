@@ -3,7 +3,9 @@
   <component name="ChangeListManager">
     <list default="true" id="2a9352c5-4225-4a6a-953c-ae0317b53d7e" name="Default" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/scala/dima/MF.scala" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/scala/dima/MF.scala" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/scala/dima/KeyPartition.scala" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/scala/dima/KeyPartition.scala" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/scala/dima/PSOnlineMatrixFactorization.scala" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/scala/dima/PSOnlineMatrixFactorization.scala" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/scala/dima/Rating.scala" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/scala/dima/Rating.scala" afterDir="false" />
     </list>
     <ignored path="$PROJECT_DIR$/target/" />
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
@@ -16,40 +18,40 @@
     <session id="-175230351">
       <usages-collector id="statistics.lifecycle.project">
         <counts>
-          <entry key="project.closed" value="4" />
-          <entry key="project.open.time.1" value="1" />
+          <entry key="project.closed" value="5" />
+          <entry key="project.open.time.1" value="2" />
           <entry key="project.open.time.14" value="1" />
           <entry key="project.open.time.15" value="1" />
           <entry key="project.open.time.17" value="1" />
           <entry key="project.open.time.20" value="1" />
-          <entry key="project.opened" value="5" />
+          <entry key="project.opened" value="6" />
         </counts>
       </usages-collector>
       <usages-collector id="statistics.file.extensions.edit">
         <counts>
-          <entry key="scala" value="9634" />
+          <entry key="scala" value="10498" />
           <entry key="xml" value="1" />
         </counts>
       </usages-collector>
       <usages-collector id="statistics.file.types.edit">
         <counts>
-          <entry key="Scala" value="9634" />
+          <entry key="Scala" value="10498" />
           <entry key="XML" value="1" />
         </counts>
       </usages-collector>
       <usages-collector id="statistics.file.extensions.open">
         <counts>
-          <entry key="class" value="2" />
+          <entry key="class" value="5" />
           <entry key="gitignore" value="1" />
-          <entry key="scala" value="9" />
+          <entry key="scala" value="14" />
           <entry key="xml" value="1" />
         </counts>
       </usages-collector>
       <usages-collector id="statistics.file.types.open">
         <counts>
-          <entry key="CLASS" value="2" />
+          <entry key="CLASS" value="5" />
           <entry key="PLAIN_TEXT" value="1" />
-          <entry key="Scala" value="9" />
+          <entry key="Scala" value="14" />
           <entry key="XML" value="1" />
         </counts>
       </usages-collector>
@@ -60,11 +62,11 @@
   </component>
   <component name="FileEditorManager">
     <leaf SIDE_TABS_SIZE_LIMIT_KEY="300">
-      <file pinned="false" current-in-tab="true">
+      <file pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/src/main/scala/dima/MF.scala">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="2942">
-              <caret line="338" column="1" selection-start-line="338" selection-start-column="1" selection-end-line="338" selection-end-column="1" />
+            <state relative-caret-position="474">
+              <caret line="259" column="72" lean-forward="true" selection-start-line="259" selection-start-column="72" selection-end-line="259" selection-end-column="72" />
               <folding>
                 <element signature="e#0#11#0" expanded="true" />
               </folding>
@@ -93,17 +95,17 @@
       <file pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/src/main/scala/dima/Rating.scala">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="90">
-              <caret line="7" selection-start-line="7" selection-end-line="7" />
+            <state relative-caret-position="120">
+              <caret line="9" column="44" lean-forward="true" selection-start-line="9" selection-start-column="44" selection-end-line="9" selection-end-column="44" />
             </state>
           </provider>
         </entry>
       </file>
-      <file pinned="false" current-in-tab="false">
+      <file pinned="false" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/src/main/scala/dima/PSOnlineMatrixFactorization.scala">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="420">
-              <caret line="28" column="19" selection-start-line="28" selection-start-column="19" selection-end-line="28" selection-end-column="19" />
+            <state relative-caret-position="465">
+              <caret line="31" column="17" selection-start-line="31" selection-start-column="17" selection-end-line="31" selection-end-column="17" />
               <folding>
                 <element signature="e#14#48#0" expanded="true" />
               </folding>
@@ -112,10 +114,19 @@
         </entry>
       </file>
       <file pinned="false" current-in-tab="false">
+        <entry file="jar://$MAVEN_REPOSITORY$/org/apache/flink/flink-streaming-scala_2.11/1.6.0/flink-streaming-scala_2.11-1.6.0.jar!/org/apache/flink/streaming/api/scala/DataStream.class">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="645">
+              <caret line="55" column="6" selection-start-line="55" selection-start-column="6" selection-end-line="55" selection-end-column="6" />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/src/main/scala/dima/FlinkParameterServer.scala">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="180">
-              <caret line="18" column="71" selection-start-line="18" selection-start-column="71" selection-end-line="18" selection-end-column="71" />
+            <state relative-caret-position="270">
+              <caret line="24" column="22" selection-start-line="24" selection-start-column="22" selection-end-line="24" selection-end-column="22" />
             </state>
           </provider>
         </entry>
@@ -124,7 +135,7 @@
         <entry file="file://$PROJECT_DIR$/src/main/scala/dima/Messages.scala">
           <provider selected="true" editor-type-id="text-editor">
             <state relative-caret-position="105">
-              <caret line="7" selection-start-line="7" selection-end-line="7" />
+              <caret line="7" lean-forward="true" selection-start-line="7" selection-end-line="7" />
             </state>
           </provider>
         </entry>
@@ -144,6 +155,7 @@
   <component name="FindInProjectRecents">
     <findStrings>
       <find>main</find>
+      <find>part</find>
     </findStrings>
   </component>
   <component name="Git.Settings">
@@ -153,7 +165,6 @@
     <option name="CHANGED_PATHS">
       <list>
         <option value="$PROJECT_DIR$/README.md" />
-        <option value="$PROJECT_DIR$/src/main/scala/dima/KeyPartition.scala" />
         <option value="$PROJECT_DIR$/src/main/scala/dima/package.scala" />
         <option value="$PROJECT_DIR$/src/main/scala/dima/LearningRate.scala" />
         <option value="$PROJECT_DIR$/src/main/scala/dima/Utils.scala" />
@@ -173,14 +184,15 @@
         <option value="$PROJECT_DIR$/src/main/scala/dima/SimplePSSender.scala" />
         <option value="$PROJECT_DIR$/src/main/scala/dima/WorkerLogic.scala" />
         <option value="$PROJECT_DIR$/src/main/scala/dima/HashPartition.scala" />
-        <option value="$PROJECT_DIR$/src/main/scala/dima/Rating.scala" />
         <option value="$PROJECT_DIR$/src/main/scala/dima/Stratum.scala" />
         <option value="$PROJECT_DIR$/src/main/scala/dima/SGDUpdater.scala" />
-        <option value="$PROJECT_DIR$/src/main/scala/dima/PSOnlineMatrixFactorization.scala" />
         <option value="$PROJECT_DIR$/pom.xml" />
         <option value="$PROJECT_DIR$/src/main/scala/dima/StepSize.scala" />
         <option value="$PROJECT_DIR$/src/main/scala/dima/FlinkParameterServer.scala" />
+        <option value="$PROJECT_DIR$/src/main/scala/dima/KeyPartition.scala" />
+        <option value="$PROJECT_DIR$/src/main/scala/dima/Rating.scala" />
         <option value="$PROJECT_DIR$/src/main/scala/dima/MF.scala" />
+        <option value="$PROJECT_DIR$/src/main/scala/dima/PSOnlineMatrixFactorization.scala" />
       </list>
     </option>
   </component>
@@ -199,9 +211,12 @@
   <component name="ProjectLevelVcsManager" settingsEditedManually="true" />
   <component name="ProjectView">
     <navigator proportions="" version="1">
+      <showMembers ProjectPane="false" />
       <foldersAlwaysOnTop value="true" />
     </navigator>
     <panes>
+      <pane id="Scope" />
+      <pane id="AndroidView" />
       <pane id="ProjectPane">
         <subPane>
           <expand>
@@ -240,13 +255,11 @@
         </subPane>
       </pane>
       <pane id="PackagesPane" />
-      <pane id="Scope" />
-      <pane id="AndroidView" />
     </panes>
   </component>
   <component name="PropertiesComponent">
-    <property name="SearchEverywhereHistoryKey" value="assignKeyToParallelOperator&#9;PSI&#9;JAVA://org.apache.flink.runtime.state.KeyGroupRangeAssignment#assignKeyToParallelOperator&#10;rank&#9;null&#9;null" />
-    <property name="com.android.tools.idea.instantapp.provision.ProvisionBeforeRunTaskProvider.myTimeStamp" value="1536674068956" />
+    <property name="SearchEverywhereHistoryKey" value="part&#9;FILE&#9;file:///home/xelabit/dev/bigstate/src/main/scala/dima/KeyPartition.scala&#10;assignKeyToParallelOperator&#9;PSI&#9;JAVA://org.apache.flink.runtime.state.KeyGroupRangeAssignment#assignKeyToParallelOperator&#10;rank&#9;null&#9;null" />
+    <property name="com.android.tools.idea.instantapp.provision.ProvisionBeforeRunTaskProvider.myTimeStamp" value="1536755338746" />
     <property name="full.screen.before.presentation.mode" value="false" />
     <property name="last_opened_file_path" value="$PROJECT_DIR$/../flink-parameter-server" />
     <property name="settings.editor.selected.configurable" value="preferences.lookFeel" />
@@ -326,8 +339,8 @@
     <frame x="-1" y="28" width="1922" height="1145" extended-state="6" />
     <editor active="true" />
     <layout>
-      <window_info active="true" content_ui="combo" id="Project" order="0" sideWeight="0.49951878" visible="true" weight="0.18608329" />
-      <window_info id="Structure" order="1" sideWeight="0.50048125" side_tool="true" weight="0.18661043" />
+      <window_info content_ui="combo" id="Project" order="0" sideWeight="0.49855632" visible="true" weight="0.18608329" />
+      <window_info active="true" id="Structure" order="1" sideWeight="0.5014437" side_tool="true" visible="true" weight="0.18608329" />
       <window_info id="Image Layers" order="2" />
       <window_info id="Designer" order="3" />
       <window_info id="UI Designer" order="4" />
@@ -336,6 +349,7 @@
       <window_info id="Learn" order="7" />
       <window_info id="Maven Projects" order="8" show_stripe_button="false" weight="0.32977587" />
       <window_info id="Event Log" order="9" sideWeight="0.50048125" side_tool="true" weight="0.18661043" />
+      <window_info id="Version Control" order="10" />
       <window_info anchor="bottom" id="Message" order="0" />
       <window_info anchor="bottom" id="Find" order="1" />
       <window_info anchor="bottom" id="Run" order="2" weight="0.56274134" />
@@ -343,9 +357,8 @@
       <window_info anchor="bottom" id="Cvs" order="4" weight="0.25" />
       <window_info anchor="bottom" id="Inspection" order="5" weight="0.4" />
       <window_info anchor="bottom" id="TODO" order="6" show_stripe_button="false" weight="0.3297244" />
-      <window_info anchor="bottom" id="Version Control" order="7" />
-      <window_info anchor="bottom" id="Terminal" order="8" show_stripe_button="false" />
-      <window_info anchor="bottom" id="Messages" order="9" weight="0.32751092" />
+      <window_info anchor="bottom" id="Terminal" order="7" show_stripe_button="false" />
+      <window_info anchor="bottom" id="Messages" order="8" weight="0.32751092" />
       <window_info anchor="right" id="Commander" internal_type="SLIDING" order="0" type="SLIDING" weight="0.4" />
       <window_info anchor="right" id="Ant Build" order="1" show_stripe_button="false" weight="0.25" />
       <window_info anchor="right" content_ui="combo" id="Hierarchy" order="2" weight="0.25" />
@@ -431,18 +444,10 @@
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/src/main/scala/dima/KeyPartition.scala" />
     <entry file="jar://$MAVEN_REPOSITORY$/org/scala-lang/scala-library/2.11.12/scala-library-2.11.12.jar!/scala/math/package.class">
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="345">
           <caret line="23" column="6" selection-start-line="23" selection-start-column="6" selection-end-line="23" selection-end-column="6" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/src/main/scala/dima/StreamingJob.scala">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="374">
-          <caret line="73" column="57" selection-start-line="73" selection-start-column="24" selection-end-line="73" selection-end-column="57" />
         </state>
       </provider>
     </entry>
@@ -492,13 +497,6 @@
         </state>
       </provider>
     </entry>
-    <entry file="jar://$MAVEN_REPOSITORY$/org/apache/flink/flink-streaming-scala_2.11/1.6.0/flink-streaming-scala_2.11-1.6.0.jar!/org/apache/flink/streaming/api/scala/DataStream.class">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="335">
-          <caret line="63" column="6" selection-start-line="63" selection-start-column="6" selection-end-line="63" selection-end-column="6" />
-        </state>
-      </provider>
-    </entry>
     <entry file="file://$PROJECT_DIR$/src/main/scala/dima/ParameterServerClient.scala">
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="120">
@@ -539,24 +537,10 @@
     <entry file="file://$PROJECT_DIR$/.gitignore">
       <provider selected="true" editor-type-id="text-editor" />
     </entry>
-    <entry file="file://$PROJECT_DIR$/src/main/scala/dima/Messages.scala">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="105">
-          <caret line="7" selection-start-line="7" selection-end-line="7" />
-        </state>
-      </provider>
-    </entry>
     <entry file="file://$PROJECT_DIR$/pom.xml">
       <provider selected="true" editor-type-id="text-editor">
         <state relative-caret-position="705">
           <caret line="47" column="26" selection-start-line="47" selection-start-column="26" selection-end-line="47" selection-end-column="26" />
-        </state>
-      </provider>
-    </entry>
-    <entry file="file://$PROJECT_DIR$/src/main/scala/dima/Rating.scala">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="90">
-          <caret line="7" selection-start-line="7" selection-end-line="7" />
         </state>
       </provider>
     </entry>
@@ -574,10 +558,17 @@
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/src/main/scala/dima/StepSize.scala">
+    <entry file="file://$PROJECT_DIR$/src/main/scala/dima/RangedRandomFactorInitializer.scala">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="600">
-          <caret line="40" column="1" selection-start-line="40" selection-start-column="1" selection-end-line="40" selection-end-column="1" />
+        <state relative-caret-position="90">
+          <caret line="6" column="61" selection-start-line="6" selection-start-column="61" selection-end-line="6" selection-end-column="61" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="jar://$MAVEN_REPOSITORY$/org/apache/flink/flink-core/1.6.0/flink-core-1.6.0.jar!/org/apache/flink/api/common/functions/Partitioner.class">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="120">
+          <caret line="12" column="17" selection-start-line="12" selection-start-column="17" selection-end-line="12" selection-end-column="17" />
         </state>
       </provider>
     </entry>
@@ -588,36 +579,71 @@
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/src/main/scala/dima/RangedRandomFactorInitializer.scala">
+    <entry file="file://$PROJECT_DIR$/src/main/scala/dima/StepSize.scala">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="90">
-          <caret line="6" column="61" selection-start-line="6" selection-start-column="61" selection-end-line="6" selection-end-column="61" />
+        <state relative-caret-position="600">
+          <caret line="40" column="1" selection-start-line="40" selection-start-column="1" selection-end-line="40" selection-end-column="1" />
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/src/main/scala/dima/FlinkParameterServer.scala">
+    <entry file="file://$PROJECT_DIR$/src/main/scala/dima/StreamingJob.scala">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="180">
-          <caret line="18" column="71" selection-start-line="18" selection-start-column="71" selection-end-line="18" selection-end-column="71" />
+        <state relative-caret-position="480">
+          <caret line="73" column="57" selection-start-line="73" selection-start-column="24" selection-end-line="73" selection-end-column="57" />
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/src/main/scala/dima/PSOnlineMatrixFactorization.scala">
+    <entry file="file://$PROJECT_DIR$/src/main/scala/dima/Rating.scala">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="420">
-          <caret line="28" column="19" selection-start-line="28" selection-start-column="19" selection-end-line="28" selection-end-column="19" />
-          <folding>
-            <element signature="e#14#48#0" expanded="true" />
-          </folding>
+        <state relative-caret-position="120">
+          <caret line="9" column="44" lean-forward="true" selection-start-line="9" selection-start-column="44" selection-end-line="9" selection-end-column="44" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="jar://$MAVEN_REPOSITORY$/org/apache/flink/flink-streaming-scala_2.11/1.6.0/flink-streaming-scala_2.11-1.6.0.jar!/org/apache/flink/streaming/api/scala/DataStream.class">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="645">
+          <caret line="55" column="6" selection-start-line="55" selection-start-column="6" selection-end-line="55" selection-end-column="6" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/main/scala/dima/KeyPartition.scala">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="60">
+          <caret line="7" column="7" selection-start-line="7" selection-start-column="7" selection-end-line="7" selection-end-column="7" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/main/scala/dima/Messages.scala">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="105">
+          <caret line="7" lean-forward="true" selection-start-line="7" selection-end-line="7" />
         </state>
       </provider>
     </entry>
     <entry file="file://$PROJECT_DIR$/src/main/scala/dima/MF.scala">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="2942">
-          <caret line="338" column="1" selection-start-line="338" selection-start-column="1" selection-end-line="338" selection-end-column="1" />
+        <state relative-caret-position="474">
+          <caret line="259" column="72" lean-forward="true" selection-start-line="259" selection-start-column="72" selection-end-line="259" selection-end-column="72" />
           <folding>
             <element signature="e#0#11#0" expanded="true" />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/main/scala/dima/FlinkParameterServer.scala">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="270">
+          <caret line="24" column="22" selection-start-line="24" selection-start-column="22" selection-end-line="24" selection-end-column="22" />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/src/main/scala/dima/PSOnlineMatrixFactorization.scala">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="465">
+          <caret line="31" column="17" selection-start-line="31" selection-start-column="17" selection-end-line="31" selection-end-column="17" />
+          <folding>
+            <element signature="e#14#48#0" expanded="true" />
           </folding>
         </state>
       </provider>
