@@ -19,6 +19,9 @@ object FlinkParameterServer {
                                    tiPSOut: TypeInformation[PSOut], tiWOut: TypeInformation[WOut]):
   DataStream[Either[WOut, PSOut]] = {
     val hashFunc: Any => Int = x => Math.abs(x.hashCode())
+
+    /* The partiton of item factor vectors should be happening in another way, i.e. according to the itemPartition field
+       of a Rating tuple. */
     val workerToPSPartitioner: WorkerToPS[P] => Int = {
       case WorkerToPS(_, msg) =>
         msg match {

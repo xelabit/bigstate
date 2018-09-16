@@ -9,6 +9,7 @@ import org.apache.flink.api.common.state.{MapState, MapStateDescriptor}
 import org.apache.flink.api.scala.DataSet
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.streaming.api.TimeCharacteristic
+import org.apache.flink.streaming.api.functions.KeyedProcessFunction
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.scala.function.ProcessWindowFunction
@@ -258,6 +259,7 @@ class DSGD extends ProcessWindowFunction[Rating, Either[(UserId, Vector), (ItemI
         substrategies.drop(1)
         val blocks = getStratum(strategy, substrategy)
         val lastFM: DataStream[Rating] = MF.env.fromCollection(ratings).filter(new StratumFilterFunction(blocks))
+//        val lastFMKeyed: KeyedStream[Rating, Int] = lastFM.keyBy(_.key)
 
         // TODO: partitioner should be implemented correctly.
         PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, stepSize.learningRate, pullLimit,

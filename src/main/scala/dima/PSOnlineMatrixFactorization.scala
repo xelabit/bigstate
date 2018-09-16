@@ -25,10 +25,8 @@ object PSOnlineMatrixFactorization {
     val serverLogic = new SimplePSLogic[Array[Double]](
       x => factorInitDesc.open().nextFactor(x), { (vec, deltaVec) => vectorSum(vec, deltaVec) }
     )
-
-    // TODO: substitute with my partitioner.
     val partitionedInput = src.partitionCustom(new Partitioner[Int] {
-      override def partition(key: Int, numPartitions: Int): Int = { key }
+      override def partition(key: UserId, numPartitions: Int): ItemId = { key }
     }, x => x.key)
     val modelUpdates = FlinkParameterServer.transform(partitionedInput, workerLogic, serverLogic, workerParallelism,
       psParallelism, iterationWaitTime)
