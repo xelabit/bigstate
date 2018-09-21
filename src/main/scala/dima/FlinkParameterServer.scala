@@ -32,8 +32,8 @@ object FlinkParameterServer {
     val psToWorkerPartitioner: PSToWorker[P] => Int = {
       case PSToWorker(workerPartitionIndex, _) => workerPartitionIndex
     }
-    transform[T, P, PSOut, WOut, PSToWorker[P], WorkerToPS[P]](trainingData, workerLogic, psLogic, workerToPSPartitioner,
-      psToWorkerPartitioner, workerParallelism, psParallelism, new SimpleWorkerReceiver[P],
+    transform[T, P, PSOut, WOut, PSToWorker[P], WorkerToPS[P]](trainingData, workerLogic, psLogic,
+      workerToPSPartitioner, psToWorkerPartitioner, workerParallelism, psParallelism, new SimpleWorkerReceiver[P],
       new SimpleWorkerSender[P], new SimplePSReceiver[P], new SimplePSSender[P], iterationWaitTime)
   }
 
@@ -53,8 +53,8 @@ object FlinkParameterServer {
                                                            tiWorkerIn: TypeInformation[PStoWorker],
                                                            tiWorkerOut: TypeInformation[WorkerToPS]
                                                           ): DataStream[Either[WOut, PSOut]] = {
-    def stepFunc(workerIn: ConnectedStreams[T, PStoWorker]):
-    (DataStream[PStoWorker], DataStream[Either[WOut, PSOut]]) = {
+    def stepFunc(workerIn: ConnectedStreams[T, PStoWorker]
+                ): (DataStream[PStoWorker], DataStream[Either[WOut, PSOut]]) = {
       val worker = workerIn
         .flatMap(
           new RichCoFlatMapFunction[T, PStoWorker, Either[WorkerToPS, WOut]] {
@@ -172,7 +172,8 @@ object FlinkParameterServer {
     override def output(out: PSOut): Unit = collector.collect(Right(out))
   }
 
-  private class MessagingPSClient[IN, OUT, P, WOut](sender: WorkerSender[OUT, P]) extends ParameterServerClient[P, WOut] {
+  private class MessagingPSClient[IN, OUT, P, WOut](sender: WorkerSender[OUT, P]
+                                                   ) extends ParameterServerClient[P, WOut] {
     private var collector: Collector[Either[OUT, WOut]] = _
     private var partitionId: Int = -1
 

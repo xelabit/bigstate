@@ -1,6 +1,6 @@
 import MF._
 import breeze.linalg.{DenseMatrix, DenseVector}
-import breeze.numerics.pow
+import breeze.numerics.{abs, pow}
 import dima.Utils.{ItemId, UserId}
 import dima.{PSOnlineMatrixFactorization, Rating, SGDUpdater, StepSize, Utils}
 import dima.Vector._
@@ -32,6 +32,8 @@ object MF {
   val numFactors = 10
   val rangeMin = -0.1
   val rangeMax = 0.1
+  val userMemory = 128
+  val negativeSampleRate = 9
 
   // TODO: replace 10000 with real values.
   val maxUId = 10000
@@ -50,6 +52,7 @@ object MF {
   val stepSize = new StepSize(workerParallelism)
   var learningRates: Seq[Double] = stepSize.makeInitialSeq()
   val learningRate = 0.01
+  var stratumSize = 0
   val pullLimit = 1500
   val iterationWaitTime = 10000
   val env: StreamExecutionEnvironment = StreamExecutionEnvironment.getExecutionEnvironment
@@ -128,6 +131,9 @@ class DSGD extends ProcessWindowFunction[Rating, Either[(UserId, Vector), (ItemI
   private var itemState: MapState[ItemId, Vector] = _
   private var userStateDescriptor: MapStateDescriptor[UserId, Vector] = _
   private var itemStateDescriptor: MapStateDescriptor[ItemId, Vector] = _
+
+  // If the difference between the losses of two subsequent epochs is smaller than the threshold, we stop the training.
+  val threshold = 0.01
 
   /**
     * Calculates the blocks that will form a stratum.
@@ -260,10 +266,8 @@ class DSGD extends ProcessWindowFunction[Rating, Either[(UserId, Vector), (ItemI
         val blocks = getStratum(strategy, substrategy)
         val lastFM: DataStream[Rating] = MF.env.fromCollection(ratings).filter(new StratumFilterFunction(blocks))
 //        val lastFMKeyed: KeyedStream[Rating, Int] = lastFM.keyBy(_.key)
-
-        // TODO: partitioner should be implemented correctly.
-        PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, stepSize.learningRate, pullLimit,
-          workerParallelism, psParallelism, iterationWaitTime)
+        PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, stepSize.learningRate,
+          stratumSize, userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime)
           .addSink(new RichSinkFunction[Either[(UserId, Vector), (ItemId, Vector)]] {
             val userVectors = new mutable.HashMap[UserId, Vector]
             val itemVectors = new mutable.HashMap[ItemId, Vector]
@@ -303,7 +307,8 @@ class DSGD extends ProcessWindowFunction[Rating, Either[(UserId, Vector), (ItemI
           else stepSize.decBoldDriver()
         }
       }
-      lastEpochLoss = epochLoss
+      if (abs(epochLoss - lastEpochLoss) < threshold) hasConverged = true
+      else lastEpochLoss = epochLoss
     }
   }
 
@@ -332,10 +337,13 @@ class StratumFilterFunction(blocks: (Seq[Int], Seq[Int])) extends RichFilterFunc
     var f = false
     for (i <- 0 until MF.workerParallelism) {
       if (t.userPartition == blocks._1(i) && t.itemPartition == blocks._2(i)) {
+        MF.stratumSize += 1
         f = true
         break
       }
     }
     f
   }
+
+  override def close(): Unit = MF.stratumSize = 0
 }
