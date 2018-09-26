@@ -116,6 +116,17 @@ object MF {
       .keyBy(_.key)
       .window(TumblingEventTimeWindows.of(Time.days(1)))
       .process(new DSGD())
+    var hasConverged = false
+    var lastEpochLoss: Double = null
+    var isFirstEpoch = true
+    var isBoldDriver = false
+
+    // Epoch.
+    while (!hasConverged) {
+
+      // Problem: ratings are not shuffled from epoch to epoch.
+      val ratings: DataStream[Rating] = lastFM
+    }
     env.execute()
   }
 }
@@ -126,7 +137,7 @@ object MF {
   * process our ratings several times (which corresponds to the number of epochs according to DSGD algorithm) with
   * different learning rates.
   */
-class DSGD extends ProcessWindowFunction[Rating, Either[(UserId, Vector), (ItemId, Vector)], Int, TimeWindow] {
+class DSGD extends ProcessWindowFunction[Rating, Rating, Int, TimeWindow] {
   private var userState: MapState[UserId, Vector] = _
   private var itemState: MapState[ItemId, Vector] = _
   private var userStateDescriptor: MapStateDescriptor[UserId, Vector] = _
@@ -190,6 +201,13 @@ class DSGD extends ProcessWindowFunction[Rating, Either[(UserId, Vector), (ItemI
     bestLearningRate
   }
 
+  /**
+    * Calculates loss (difference between actual ratings and the ratings obtained from multiplying factor matrices).
+    * @param w user factor matrix.
+    * @param h item factor matrix.
+    * @param ratings true values from matrix V.
+    * @return single value of loss.
+    */
   def getLoss(w: mutable.HashMap[UserId, Vector], h: mutable.HashMap[ItemId, Vector], ratings: Iterator[Rating]
              ): Double = {
     var loss = 0
@@ -202,6 +220,7 @@ class DSGD extends ProcessWindowFunction[Rating, Either[(UserId, Vector), (ItemI
     loss
   }
 
+  // TODO: do not initialize factor matrices every time.
   /**
     * A function that takes a stream of ratings, performs gradient descent for factor matrices for each possible
     * learning rate (defined in MF.learningRates) and outputs a stream either of updated user or item factor vectors.
@@ -209,8 +228,13 @@ class DSGD extends ProcessWindowFunction[Rating, Either[(UserId, Vector), (ItemI
     */
   def testLearningRatesOnSample(elements: Iterable[Rating]): Unit = {
 
+    /* In order to be able to test on a whole sample, we randomly choose a partition, from which we will sample. A
+       little bit artificial but should be sufficient for our purposes. */
+    val whichPartition = Random.nextInt(MF.workerParallelism - 1)
+
     // Select 0,01% of initial data at random in order to test various learning rates on it.
-    val sample = Random.shuffle(elements.toList).drop((elements.size * .999).toInt).iterator
+    val sample = Random.shuffle(elements.filter(x => x.userPartition == whichPartition).toList)
+      .drop((elements.size * .999).toInt).iterator
     val sgdUpdaters: Seq[SGDUpdater] = Seq.empty[SGDUpdater]
     var k = 0
     for (i <- MF.learningRates) {
@@ -220,7 +244,7 @@ class DSGD extends ProcessWindowFunction[Rating, Either[(UserId, Vector), (ItemI
     val userVectors = new mutable.HashMap[UserId, Vector]
     val itemVectors = new mutable.HashMap[ItemId, Vector]
     val wMaps: Seq[mutable.HashMap[UserId, Vector]] = Seq.empty
-    val hMaps: Seq[mutable.HashMap[UserId, Vector]] = Seq.empty
+    val hMaps: Seq[mutable.HashMap[ItemId, Vector]] = Seq.empty
 
     // Create hash maps (user/item factor matrices) for each learning rate.
     for (i <- sgdUpdaters.indices) {
@@ -231,8 +255,8 @@ class DSGD extends ProcessWindowFunction[Rating, Either[(UserId, Vector), (ItemI
       val out = MF.learningRates.map(x => (x, rating))
       var k = 0
       for (i <- out) {
-        var w: Vector = wMaps(k)(i._2.user)
-        var h: Vector = hMaps(k)(i._2.item)
+        val w: Vector = wMaps(k)(i._2.user)
+        val h: Vector = hMaps(k)(i._2.item)
         (w, h) = sgdUpdaters(k).delta(i._2.rating, w, h, sample.size)
         wMaps(k).update(i._2.user, w)
         hMaps(k).update(i._2.item, h)
@@ -243,7 +267,7 @@ class DSGD extends ProcessWindowFunction[Rating, Either[(UserId, Vector), (ItemI
   }
 
   override def process(key: Int, context: Context, elements: Iterable[Rating],
-                       out: Collector[Either[(UserId, Vector), (ItemId, Vector)]]): Unit = {
+                       out: Collector[Rating]): Unit = {
     userState = context.globalState.getMapState(userStateDescriptor)
     itemState = context.globalState.getMapState(itemStateDescriptor)
     testLearningRatesOnSample(elements)
@@ -256,16 +280,15 @@ class DSGD extends ProcessWindowFunction[Rating, Either[(UserId, Vector), (ItemI
     while (!hasConverged) {
       val ratings = Random.shuffle(elements.toList).iterator
       val strategy = Random.nextInt(2)
-      val substrategies = 0 to MF.workerParallelism
+      var substrategies = 0 until MF.workerParallelism
 
       /* The number of subepochs is equal to the number of partitions of original matrix or, in other words, to the
          number of worker nodes. */
       for (i <- 0 until MF.workerParallelism) {
         val substrategy = Random.shuffle(substrategies.toList).head
-        substrategies.drop(1)
+        substrategies = substrategies.drop(1)
         val blocks = getStratum(strategy, substrategy)
         val lastFM: DataStream[Rating] = MF.env.fromCollection(ratings).filter(new StratumFilterFunction(blocks))
-//        val lastFMKeyed: KeyedStream[Rating, Int] = lastFM.keyBy(_.key)
         PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, stepSize.learningRate,
           stratumSize, userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime)
           .addSink(new RichSinkFunction[Either[(UserId, Vector), (ItemId, Vector)]] {
