@@ -57,6 +57,45 @@ object MF {
   val iterationWaitTime = 10000
   val env: StreamExecutionEnvironment = StreamExecutionEnvironment.getExecutionEnvironment
 
+  def epoch(ratings: DataStream[Rating]): (DataStream[Rating], DataStream[Rating]) = {
+    val stratumStream = ratings
+      .keyBy(_.key)
+      .window(TumblingEventTimeWindows.of(Time.days(1)))
+      .process(new DSGD)
+    PSOnlineMatrixFactorization.psOnlineMF(stratumStream, numFactors, rangeMin, rangeMax, stepSize.learningRate,
+      stratumSize, userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime)
+      .addSink(new RichSinkFunction[Either[(UserId, Vector), (ItemId, Vector)]] {
+        val userVectors = new mutable.HashMap[UserId, Vector]
+        val itemVectors = new mutable.HashMap[ItemId, Vector]
+
+        override def invoke(value: Either[(UserId, Vector), (ItemId, Vector)]): Unit = {
+          value match {
+            case Left((userId, vec)) => userVectors.update(userId, vec)
+            case Right((itemId, vec)) => itemVectors.update(itemId, vec)
+          }
+        }
+
+        override def close(): Unit = {
+          val epochLoss = Utils.getLoss(userVectors, itemVectors, ratings)
+
+          // Decision for a new learning rate.
+          if (isFirstEpoch) isFirstEpoch = false
+          else if (!isBoldDriver) {
+            if (epochLoss < lastEpochLoss) {
+              MF.learningRates = stepSize.getLearningRatesForNextEpoch()
+              testLearningRatesOnSample(elements)
+            } else {
+              isBoldDriver = true
+              if (epochLoss < lastEpochLoss) stepSize.incBoldDriver()
+              else stepSize.decBoldDriver()
+            }
+          }
+          if (abs(epochLoss - lastEpochLoss) < threshold) hasConverged = true
+          else lastEpochLoss = epochLoss
+        }
+      }).setParallelism(1)
+  }
+
   def main(args: Array[String]): Unit = {
     val input_file_name = args(0)
     val userVector_output_name = args(1)
@@ -97,7 +136,7 @@ object MF {
         val partitionSize = maxId / n
         val leftover = maxId - partitionSize * n
         val flag = leftover == 0
-        if (id < maxId) getHash(id,0, flag, partitionSize, leftover)
+        if (id < maxId) getHash(id, 0, flag, partitionSize, leftover)
         else -1
       }
 
@@ -115,18 +154,8 @@ object MF {
       .assignAscendingTimestamps(_.timestamp.getMillis)
       .keyBy(_.key)
       .window(TumblingEventTimeWindows.of(Time.days(1)))
-      .process(new DSGD())
-    var hasConverged = false
-    var lastEpochLoss: Double = null
-    var isFirstEpoch = true
-    var isBoldDriver = false
-
-    // Epoch.
-    while (!hasConverged) {
-
-      // Problem: ratings are not shuffled from epoch to epoch.
-      val ratings: DataStream[Rating] = lastFM
-    }
+      .process(new RatesProcessFunction)
+      .iterate((x: DataStream[Rating]) => epoch(x), 100)
     env.execute()
   }
 }
@@ -288,27 +317,17 @@ class DSGD extends ProcessWindowFunction[Rating, Rating, Int, TimeWindow] {
         val substrategy = Random.shuffle(substrategies.toList).head
         substrategies = substrategies.drop(1)
         val blocks = getStratum(strategy, substrategy)
-        val lastFM: DataStream[Rating] = MF.env.fromCollection(ratings).filter(new StratumFilterFunction(blocks))
-        PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, stepSize.learningRate,
-          stratumSize, userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime)
-          .addSink(new RichSinkFunction[Either[(UserId, Vector), (ItemId, Vector)]] {
-            val userVectors = new mutable.HashMap[UserId, Vector]
-            val itemVectors = new mutable.HashMap[ItemId, Vector]
-
-            override def invoke(value: Either[(UserId, Vector), (ItemId, Vector)]): Unit = {
-              value match {
-                case Left((userId, vec)) => userVectors.update(userId, vec)
-                case Right((itemId, vec)) => itemVectors.update(itemId, vec)
-              }
+        ratings.foreach(r => {
+          for (i <- 0 until MF.workerParallelism) {
+            if (r.userPartition == blocks._1(i) && r.itemPartition == blocks._2(i)) {
+              MF.stratumSize += 1
+              out.collect(r)
+              break
             }
+          }
+        })
 
-            override def close(): Unit = {
-              val javaUserMap = userVectors.map(x => x).asJava
-              val javaItemMap = itemVectors.map(x => x).asJava
-              userState.putAll(javaUserMap)
-              itemState.putAll(javaItemMap)
-            }
-          }).setParallelism(1)
+        // TODO: wait.
       }
 
       // Transform states into Scala maps in order to calculate the loss of this epoch.
@@ -369,4 +388,12 @@ class StratumFilterFunction(blocks: (Seq[Int], Seq[Int])) extends RichFilterFunc
   }
 
   override def close(): Unit = MF.stratumSize = 0
+}
+
+class RatesProcessFunction extends ProcessWindowFunction[Rating, Rating, Int, TimeWindow] {
+
+  override def process(key: Int, context: Context, elements: Iterable[Rating], out: Collector[Rating]): Unit = {
+    Utils.testLearningRatesOnSample(elements, MF.workerParallelism, MF.learningRates, MF.stepSize)
+    elements.map(r => out.collect(r))
+  }
 }
