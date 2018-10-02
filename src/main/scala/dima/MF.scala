@@ -10,6 +10,7 @@ import org.apache.flink.api.scala.DataSet
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.streaming.api.TimeCharacteristic
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction
+import org.apache.flink.streaming.api.functions.co.{CoFlatMapFunction, CoProcessFunction}
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.scala.function.ProcessWindowFunction
@@ -58,42 +59,76 @@ object MF {
   val env: StreamExecutionEnvironment = StreamExecutionEnvironment.getExecutionEnvironment
 
   def epoch(ratings: DataStream[Rating]): (DataStream[Rating], DataStream[Rating]) = {
+    var hasConverged = false
     val stratumStream = ratings
       .keyBy(_.key)
       .window(TumblingEventTimeWindows.of(Time.days(1)))
       .process(new DSGD)
-    PSOnlineMatrixFactorization.psOnlineMF(stratumStream, numFactors, rangeMin, rangeMax, stepSize.learningRate,
-      stratumSize, userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime)
-      .addSink(new RichSinkFunction[Either[(UserId, Vector), (ItemId, Vector)]] {
+    val factorStream = PSOnlineMatrixFactorization.psOnlineMF(stratumStream, numFactors, rangeMin, rangeMax,
+      stepSize.learningRate, stratumSize, userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism,
+      iterationWaitTime)
+    val lossStream = stratumStream
+      .connect(factorStream)
+      .process(new CoProcessFunction[Rating, Either[(UserId, Vector), (ItemId, Vector)], (Int, Double)] {
         val userVectors = new mutable.HashMap[UserId, Vector]
         val itemVectors = new mutable.HashMap[ItemId, Vector]
+        var ratings: Seq[Rating] = Seq.empty
+        var subepoch: Int = 0
+        var epoch = 0
+        var epochLoss = 0.0
 
-        override def invoke(value: Either[(UserId, Vector), (ItemId, Vector)]): Unit = {
-          value match {
-            case Left((userId, vec)) => userVectors.update(userId, vec)
+        override def processElement1(in1: Rating,
+                                     context: CoProcessFunction[Rating, Either[(UserId, Vector), (ItemId, Vector)],
+                                       (Int, Double)]#Context, collector: Collector[(Int, Double)]): Unit = {
+          ratings = ratings.+:(in1)
+        }
+
+        override def processElement2(in2: Either[(UserId, Vector), (ItemId, Vector)],
+                                     context: CoProcessFunction[Rating, Either[(UserId, Vector), (ItemId, Vector)],
+                                       (Int, Double)]#Context, collector: Collector[(Int, Double)]): Unit = {
+          in2 match {
+            case Left((userId, vec)) => {
+              userVectors.update(userId, vec)
+
+              /* If we meet a record with such user ID, we know that the subepoch has ended and we can calculate its
+                 loss. */
+              if (userId == -1) {
+                subepoch += 1
+                epochLoss += Utils.getLoss(userVectors, itemVectors, ratings.iterator)
+                if (subepoch == MF.workerParallelism) {
+                  subepoch = 0
+                  collector.collect(epoch, epochLoss)
+                  epoch += 1
+                }
+              }
+            }
             case Right((itemId, vec)) => itemVectors.update(itemId, vec)
           }
         }
+      })
+      .keyBy(_._1)
+    val epochLosses = lossStream.sum(2).setParallelism(1).flatMap(new RichFlatMapFunction[(Int, Double), Double] {
+      var lastEpochLoss: Double = null
+      var isFirstEpoch = true
+      var isBoldDriver = false
+      val threshold = 0.01
 
-        override def close(): Unit = {
-          val epochLoss = Utils.getLoss(userVectors, itemVectors, ratings)
-
-          // Decision for a new learning rate.
-          if (isFirstEpoch) isFirstEpoch = false
-          else if (!isBoldDriver) {
-            if (epochLoss < lastEpochLoss) {
-              MF.learningRates = stepSize.getLearningRatesForNextEpoch()
-              testLearningRatesOnSample(elements)
-            } else {
+      override def flatMap(in: (ItemId, Double), collector: Collector[Double]): Unit = {
+        if (isFirstEpoch) isFirstEpoch = false
+        else if (!isBoldDriver) {
+          if (in._2 < lastEpochLoss) {
+            MF.learningRates = stepSize.getLearningRatesForNextEpoch()
+            testLearningRatesOnSample(elements)
+          } else {
               isBoldDriver = true
-              if (epochLoss < lastEpochLoss) stepSize.incBoldDriver()
+              if (in._2 < lastEpochLoss) stepSize.incBoldDriver()
               else stepSize.decBoldDriver()
             }
-          }
-          if (abs(epochLoss - lastEpochLoss) < threshold) hasConverged = true
-          else lastEpochLoss = epochLoss
         }
-      }).setParallelism(1)
+        if (abs(in._2 - lastEpochLoss) < threshold) hasConverged = true
+        else lastEpochLoss = in._2
+      }
+    })
   }
 
   def main(args: Array[String]): Unit = {
@@ -300,58 +335,35 @@ class DSGD extends ProcessWindowFunction[Rating, Rating, Int, TimeWindow] {
     userState = context.globalState.getMapState(userStateDescriptor)
     itemState = context.globalState.getMapState(itemStateDescriptor)
     testLearningRatesOnSample(elements)
-    var hasConverged = false
-    var lastEpochLoss: Double = null
-    var isFirstEpoch = true
-    var isBoldDriver = false
+    val ratings = Random.shuffle(elements.toList).iterator
+    val strategy = Random.nextInt(2)
+    var substrategies = 0 until MF.workerParallelism
 
-    // Epoch.
-    while (!hasConverged) {
-      val ratings = Random.shuffle(elements.toList).iterator
-      val strategy = Random.nextInt(2)
-      var substrategies = 0 until MF.workerParallelism
-
-      /* The number of subepochs is equal to the number of partitions of original matrix or, in other words, to the
-         number of worker nodes. */
-      for (i <- 0 until MF.workerParallelism) {
-        val substrategy = Random.shuffle(substrategies.toList).head
-        substrategies = substrategies.drop(1)
-        val blocks = getStratum(strategy, substrategy)
-        ratings.foreach(r => {
-          for (i <- 0 until MF.workerParallelism) {
-            if (r.userPartition == blocks._1(i) && r.itemPartition == blocks._2(i)) {
-              MF.stratumSize += 1
-              out.collect(r)
-              break
-            }
+    /* The number of subepochs is equal to the number of partitions of original matrix or, in other words, to the
+       number of worker nodes. */
+    for (i <- 0 until MF.workerParallelism) {
+      val substrategy = Random.shuffle(substrategies.toList).head
+      substrategies = substrategies.drop(1)
+      val blocks = getStratum(strategy, substrategy)
+      ratings.foreach(r => {
+        for (i <- 0 until MF.workerParallelism) {
+          if (r.userPartition == blocks._1(i) && r.itemPartition == blocks._2(i)) {
+//            MF.stratumSize += 1
+            out.collect(r)
+            break
           }
-        })
+        }
+      })
 
-        // TODO: wait.
-      }
+      // TODO: wait.
+    }
 
       // Transform states into Scala maps in order to calculate the loss of this epoch.
-      val scalaUserMap: mutable.HashMap[UserId, Vector] = new mutable.HashMap[UserId, Vector]()
-      val scalaItemMap: mutable.HashMap[ItemId, Vector] = new mutable.HashMap[ItemId, Vector]()
-      userState.entries().forEach(kv => scalaUserMap.update(kv.getKey, kv.getValue))
-      itemState.entries().forEach(kv => scalaItemMap.update(kv.getKey, kv.getValue))
-      val epochLoss = getLoss(scalaUserMap, scalaItemMap, ratings)
-
-      // Decision for a new learning rate.
-      if (isFirstEpoch) isFirstEpoch = false
-      else if (!isBoldDriver) {
-        if (epochLoss < lastEpochLoss) {
-          MF.learningRates = stepSize.getLearningRatesForNextEpoch()
-          testLearningRatesOnSample(elements)
-        } else {
-          isBoldDriver = true
-          if (epochLoss < lastEpochLoss) stepSize.incBoldDriver()
-          else stepSize.decBoldDriver()
-        }
-      }
-      if (abs(epochLoss - lastEpochLoss) < threshold) hasConverged = true
-      else lastEpochLoss = epochLoss
-    }
+//      val scalaUserMap: mutable.HashMap[UserId, Vector] = new mutable.HashMap[UserId, Vector]()
+//      val scalaItemMap: mutable.HashMap[ItemId, Vector] = new mutable.HashMap[ItemId, Vector]()
+//      userState.entries().forEach(kv => scalaUserMap.update(kv.getKey, kv.getValue))
+//      itemState.entries().forEach(kv => scalaItemMap.update(kv.getKey, kv.getValue))
+//      val epochLoss = getLoss(scalaUserMap, scalaItemMap, ratings)
   }
 
   override def open(parameters: Configuration): Unit = {
