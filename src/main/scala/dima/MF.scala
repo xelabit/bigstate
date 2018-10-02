@@ -42,14 +42,12 @@ object MF {
   val workerParallelism = 2
   val psParallelism = 2
 
-  /*
-  According to DSGD this should be different for each epoch. ε0 is chosen among 1, 1/2, 1/4, ..., 1/2^(d-1), d is
-  the number of worker nodes. Each of this value is tried in parallel (on a small subset of matrix V (~0.1%). The one
-  which yields the smallest loss is chosen as ε0. If a loss decreased in the current epoch, in the next one we choose
-  again in parallel among [1/2, 2] multiplied by the current learning rate. If the loss after the epoch has increased,
-  we switch to "bold driver" algorithm: 1) increase the step size by 5% whenever the loss decreases over an epoch, 2)
-  decrease the step size by 50% if the loss increases.
-   */
+  /* According to DSGD this should be different for each epoch. ε0 is chosen among 1, 1/2, 1/4, ..., 1/2^(d-1), d is
+     the number of worker nodes. Each of this value is tried in parallel (on a small subset of matrix V (~0.1%). The one
+     which yields the smallest loss is chosen as ε0. If a loss decreased in the current epoch, in the next one we choose
+     again in parallel among [1/2, 2] multiplied by the current learning rate. If the loss after the epoch has
+     increased, we switch to "bold driver" algorithm: 1) increase the step size by 5% whenever the loss decreases over
+     an epoch, 2) decrease the step size by 50% if the loss increases. */
   val stepSize = new StepSize(workerParallelism)
   var learningRates: Seq[Double] = stepSize.makeInitialSeq()
   val learningRate = 0.01
@@ -88,7 +86,6 @@ object MF {
                                        (Int, Double)]#Context, collector: Collector[(Int, Double)]): Unit = {
           in2 match {
             case Left((userId, vec)) => {
-              userVectors.update(userId, vec)
 
               /* If we meet a record with such user ID, we know that the subepoch has ended and we can calculate its
                  loss. */
@@ -101,13 +98,17 @@ object MF {
                   epoch += 1
                 }
               }
+              else userVectors.update(userId, vec)
             }
             case Right((itemId, vec)) => itemVectors.update(itemId, vec)
           }
         }
       })
       .keyBy(_._1)
-    val epochLosses = lossStream.sum(2).setParallelism(1).flatMap(new RichFlatMapFunction[(Int, Double), Double] {
+    val epochLosses = lossStream
+      .sum(2)
+      .setParallelism(1)
+      .flatMap(new RichFlatMapFunction[(Int, Double), Double] {
       var lastEpochLoss: Double = null
       var isFirstEpoch = true
       var isBoldDriver = false
@@ -118,7 +119,7 @@ object MF {
         else if (!isBoldDriver) {
           if (in._2 < lastEpochLoss) {
             MF.learningRates = stepSize.getLearningRatesForNextEpoch()
-            testLearningRatesOnSample(elements)
+//            testLearningRatesOnSample(elements)
           } else {
               isBoldDriver = true
               if (in._2 < lastEpochLoss) stepSize.incBoldDriver()
@@ -129,12 +130,14 @@ object MF {
         else lastEpochLoss = in._2
       }
     })
+    if (hasConverged) (, ratings)
+    else (ratings, )
   }
 
   def main(args: Array[String]): Unit = {
     val input_file_name = args(0)
-    val userVector_output_name = args(1)
-    val itemVector_output_name = args(2)
+//    val userVector_output_name = args(1)
+//    val itemVector_output_name = args(2)
     env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
     val data = env.readTextFile(input_file_name)
     val formatter = DateTimeFormat.forPattern("dd/MM/yyyy HH:mm:ss")
@@ -187,9 +190,9 @@ object MF {
       }
     })
       .assignAscendingTimestamps(_.timestamp.getMillis)
-      .keyBy(_.key)
-      .window(TumblingEventTimeWindows.of(Time.days(1)))
-      .process(new RatesProcessFunction)
+//      .keyBy(_.key)
+//      .window(TumblingEventTimeWindows.of(Time.days(1)))
+//      .process(new RatesProcessFunction) // TODO: this should happen inside iteration.
       .iterate((x: DataStream[Rating]) => epoch(x), 100)
     env.execute()
   }
@@ -355,7 +358,7 @@ class DSGD extends ProcessWindowFunction[Rating, Rating, Int, TimeWindow] {
         }
       })
 
-      // TODO: wait.
+      // TODO: wait
     }
 
       // Transform states into Scala maps in order to calculate the loss of this epoch.
@@ -374,38 +377,30 @@ class DSGD extends ProcessWindowFunction[Rating, Rating, Int, TimeWindow] {
   }
 }
 
-/**
-  * An operator that filters out tuples that do not belong to the stratum currently being processed.
-  * @param blocks a set of (user block, item block) tuples, each of which defines a rectangle block in the initial
-  *               matrix. Those blocks are called substratums and any record that belongs to them should be selected by
-  *               this function for further processing.
-  */
-class StratumFilterFunction(blocks: (Seq[Int], Seq[Int])) extends RichFilterFunction[Rating] {
-
-  /**
-    * We will work only with points in a selected stratum.
-    * @param t element of a stream.
-    * @return true if an element belongs to one of the blocks in a stratum.
-    */
-  override def filter(t: Rating): Boolean = {
-    var f = false
-    for (i <- 0 until MF.workerParallelism) {
-      if (t.userPartition == blocks._1(i) && t.itemPartition == blocks._2(i)) {
-        MF.stratumSize += 1
-        f = true
-        break
-      }
-    }
-    f
-  }
-
-  override def close(): Unit = MF.stratumSize = 0
-}
-
-class RatesProcessFunction extends ProcessWindowFunction[Rating, Rating, Int, TimeWindow] {
-
-  override def process(key: Int, context: Context, elements: Iterable[Rating], out: Collector[Rating]): Unit = {
-    Utils.testLearningRatesOnSample(elements, MF.workerParallelism, MF.learningRates, MF.stepSize)
-    elements.map(r => out.collect(r))
-  }
-}
+///**
+//  * An operator that filters out tuples that do not belong to the stratum currently being processed.
+//  * @param blocks a set of (user block, item block) tuples, each of which defines a rectangle block in the initial
+//  *               matrix. Those blocks are called substratums and any record that belongs to them should be selected by
+//  *               this function for further processing.
+//  */
+//class StratumFilterFunction(blocks: (Seq[Int], Seq[Int])) extends RichFilterFunction[Rating] {
+//
+//  /**
+//    * We will work only with points in a selected stratum.
+//    * @param t element of a stream.
+//    * @return true if an element belongs to one of the blocks in a stratum.
+//    */
+//  override def filter(t: Rating): Boolean = {
+//    var f = false
+//    for (i <- 0 until MF.workerParallelism) {
+//      if (t.userPartition == blocks._1(i) && t.itemPartition == blocks._2(i)) {
+//        MF.stratumSize += 1
+//        f = true
+//        break
+//      }
+//    }
+//    f
+//  }
+//
+//  override def close(): Unit = MF.stratumSize = 0
+//}
