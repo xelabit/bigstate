@@ -1,7 +1,7 @@
 import MF._
 import breeze.linalg.{DenseMatrix, DenseVector}
 import breeze.numerics.{abs, pow}
-import dima.Utils.{ItemId, UserId}
+import dima.Utils.{D, ItemId, UserId, WorkerId}
 import dima.{PSOnlineMatrixFactorization, Rating, SGDUpdater, StepSize, Utils}
 import dima.Vector._
 import org.apache.flink.api.common.functions.{RichFilterFunction, RichFlatMapFunction}
@@ -51,7 +51,7 @@ object MF {
   val stepSize = new StepSize(workerParallelism)
   var learningRates: Seq[Double] = stepSize.makeInitialSeq()
   val learningRate = 0.01
-  var stratumSize = 0
+  var n = 0
   val pullLimit = 1500
   val iterationWaitTime = 10000
   val env: StreamExecutionEnvironment = StreamExecutionEnvironment.getExecutionEnvironment
@@ -63,7 +63,7 @@ object MF {
       .window(TumblingEventTimeWindows.of(Time.days(1)))
       .process(new DSGD)
     val factorStream = PSOnlineMatrixFactorization.psOnlineMF(stratumStream, numFactors, rangeMin, rangeMax,
-      stepSize.learningRate, stratumSize, userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism,
+      stepSize.learningRate, n, userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism,
       iterationWaitTime)
     val lossStream = stratumStream
       .connect(factorStream)
@@ -136,12 +136,12 @@ object MF {
 
   def main(args: Array[String]): Unit = {
     val input_file_name = args(0)
-//    val userVector_output_name = args(1)
-//    val itemVector_output_name = args(2)
+    val userVector_output_name = args(1)
+    val itemVector_output_name = args(2)
     env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
     val data = env.readTextFile(input_file_name)
     val formatter = DateTimeFormat.forPattern("dd/MM/yyyy HH:mm:ss")
-    val lastFM = data.flatMap(new RichFlatMapFunction[String, Rating] {
+    val lastFM = data.flatMap(new RichFlatMapFunction[String, (Rating, WorkerId, D)] {
 
       def getHash(x: Int, partition: Int, flag: Boolean, partitionSize: Int, leftover: Int): Int = {
         var f = flag
@@ -178,7 +178,8 @@ object MF {
         else -1
       }
 
-      override def flatMap(value: String, out: Collector[Rating]): Unit = {
+      override def flatMap(value: String, out: Collector[Rating, WorkerId, D]): Unit = {
+        var workerId = 0
         val fieldsArray = value.split(",")
         val uid = fieldsArray(2).toInt
         val iid = fieldsArray(3).toInt
@@ -186,10 +187,16 @@ object MF {
         val itemPartition = partitionId(iid, maxIId, workerParallelism)
         val r = Rating(fieldsArray(0).toInt, uid, iid, fieldsArray(4).toInt,
           formatter.parseDateTime(fieldsArray(1)), userPartition, itemPartition)
+        if (r.userPartition == r.itemPartition) workerId = r.userPartition
+        else {
+          val set = Set(r.userPartition, r.itemPartition)
+          workerId = set.toVector(Random.nextInt(2))
+        }
+        
         out.collect(r)
       }
     })
-      .assignAscendingTimestamps(_.timestamp.getMillis)
+      .assignAscendingTimestamps(_._1.timestamp.getMillis)
 //      .keyBy(_.key)
 //      .window(TumblingEventTimeWindows.of(Time.days(1)))
 //      .process(new RatesProcessFunction) // TODO: this should happen inside iteration.

@@ -10,6 +10,8 @@ import scala.util.Random
 object Utils {
   type UserId = Int
   type ItemId = Int
+  type WorkerId = Int
+  type D = Int
 
   // TODO: do not initialize factor matrices every time.
   /**
