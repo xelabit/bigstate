@@ -1,7 +1,7 @@
 import MF._
 import breeze.linalg.{DenseMatrix, DenseVector}
 import breeze.numerics.{abs, pow}
-import dima.Utils.{D, ItemId, UserId, WorkerId}
+import dima.Utils.{D, ItemId, UserId}
 import dima.{PSOnlineMatrixFactorization, Rating, SGDUpdater, StepSize, Utils}
 import dima.Vector._
 import org.apache.flink.api.common.functions.{RichFilterFunction, RichFlatMapFunction}
@@ -13,7 +13,7 @@ import org.apache.flink.streaming.api.functions.KeyedProcessFunction
 import org.apache.flink.streaming.api.functions.co.{CoFlatMapFunction, CoProcessFunction}
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction
 import org.apache.flink.streaming.api.scala._
-import org.apache.flink.streaming.api.scala.function.ProcessWindowFunction
+import org.apache.flink.streaming.api.scala.function.{ProcessWindowFunction, RichWindowFunction}
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow
@@ -141,7 +141,7 @@ object MF {
     env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
     val data = env.readTextFile(input_file_name)
     val formatter = DateTimeFormat.forPattern("dd/MM/yyyy HH:mm:ss")
-    val lastFM = data.flatMap(new RichFlatMapFunction[String, (Rating, WorkerId, D)] {
+    val lastFM = data.flatMap(new RichFlatMapFunction[String, (Rating, D)] {
 
       def getHash(x: Int, partition: Int, flag: Boolean, partitionSize: Int, leftover: Int): Int = {
         var f = flag
@@ -178,8 +178,8 @@ object MF {
         else -1
       }
 
-      override def flatMap(value: String, out: Collector[Rating, WorkerId, D]): Unit = {
-        var workerId = 0
+      override def flatMap(value: String, out: Collector[(Rating, D)]): Unit = {
+        var distance = 0
         val fieldsArray = value.split(",")
         val uid = fieldsArray(2).toInt
         val iid = fieldsArray(3).toInt
@@ -187,19 +187,17 @@ object MF {
         val itemPartition = partitionId(iid, maxIId, workerParallelism)
         val r = Rating(fieldsArray(0).toInt, uid, iid, fieldsArray(4).toInt,
           formatter.parseDateTime(fieldsArray(1)), userPartition, itemPartition)
-        if (r.userPartition == r.itemPartition) workerId = r.userPartition
-        else {
-          val set = Set(r.userPartition, r.itemPartition)
-          workerId = set.toVector(Random.nextInt(2))
+        if (r.userPartition != r.itemPartition) {
+          distance = r.itemPartition - r.userPartition
+          if (distance < 0) distance += MF.workerParallelism
         }
-        
-        out.collect(r)
+        out.collect((r, distance))
       }
     })
       .assignAscendingTimestamps(_._1.timestamp.getMillis)
-//      .keyBy(_.key)
-//      .window(TumblingEventTimeWindows.of(Time.days(1)))
-//      .process(new RatesProcessFunction) // TODO: this should happen inside iteration.
+      .keyBy(_._1.key)
+      .window(TumblingEventTimeWindows.of(Time.days(1)))
+      .apply(new SortSubstratums)
       .iterate((x: DataStream[Rating]) => epoch(x), 100)
     env.execute()
   }
@@ -411,3 +409,8 @@ class DSGD extends ProcessWindowFunction[Rating, Rating, Int, TimeWindow] {
 //
 //  override def close(): Unit = MF.stratumSize = 0
 //}
+class SortSubstratums extends RichWindowFunction[(Rating, D), Rating, Int, TimeWindow] {
+
+  override def apply(key: Int, window: TimeWindow, input: Iterable[(Rating, D)], out: Collector[Rating]): Unit =
+    input.toList.sortWith(_._2 < _._2).map(x => out.collect(x._1))
+}
