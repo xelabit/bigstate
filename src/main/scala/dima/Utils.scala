@@ -18,16 +18,17 @@ object Utils {
     * learning rate (defined in MF.learningRates) and outputs a stream either of updated user or item factor vectors.
     * @param elements ratings in a current time window. We will sample from this data set.
     */
-  def testLearningRatesOnSample(elements: Iterable[Rating], workerParallelism: Int, learningRates: Seq[Double],
+  def testLearningRatesOnSample(elements: Iterable[(Rating, D)], workerParallelism: Int, learningRates: Seq[Double],
                                 stepSize: StepSize): Unit = {
+    val ratings = elements.map(x => x._1)
 
     /* In order to be able to test on a whole sample, we randomly choose a partition, from which we will sample. A
        little bit artificial but should be sufficient for our purposes. */
     val whichPartition = Random.nextInt(workerParallelism - 1)
 
     // Select 0,01% of initial data at random in order to test various learning rates on it.
-    val sample = Random.shuffle(elements.filter(x => x.userPartition == whichPartition).toList)
-      .drop((elements.size * .999).toInt).iterator
+    val sample = Random.shuffle(ratings.filter(x => x.userPartition == whichPartition).toList)
+      .drop((ratings.size * .999).toInt).iterator
     val sgdUpdaters: Seq[SGDUpdater] = Seq.empty[SGDUpdater]
     var k = 0
     for (i <- learningRates) {
@@ -48,11 +49,11 @@ object Utils {
       val out = learningRates.map(x => (x, rating))
       var k = 0
       for (i <- out) {
-        val w: Vector = wMaps(k)(i._2.user)
-        val h: Vector = hMaps(k)(i._2.item)
-        (w, h) = sgdUpdaters(k).delta(i._2.rating, w, h, sample.size)
-        wMaps(k).update(i._2.user, w)
-        hMaps(k).update(i._2.item, h)
+        val w: Vector = wMaps(k)(rating.user)
+        val h: Vector = hMaps(k)(rating.item)
+        (w, h) = sgdUpdaters(k).delta(rating.rating, w, h, sample.size)
+        wMaps(k).update(rating.user, w)
+        hMaps(k).update(rating.item, h)
         k += 1
       }
     }

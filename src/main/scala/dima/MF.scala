@@ -1,17 +1,14 @@
 import MF._
-import breeze.linalg.{DenseMatrix, DenseVector}
+import breeze.linalg.DenseVector
 import breeze.numerics.{abs, pow}
 import dima.Utils.{D, ItemId, UserId}
 import dima.{PSOnlineMatrixFactorization, Rating, SGDUpdater, StepSize, Utils}
 import dima.Vector._
-import org.apache.flink.api.common.functions.{RichFilterFunction, RichFlatMapFunction}
-import org.apache.flink.api.common.state.{MapState, MapStateDescriptor}
-import org.apache.flink.api.scala.DataSet
+import org.apache.flink.api.common.functions.RichFlatMapFunction
+import org.apache.flink.api.common.state.{MapState, MapStateDescriptor, ValueState, ValueStateDescriptor}
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.streaming.api.TimeCharacteristic
-import org.apache.flink.streaming.api.functions.KeyedProcessFunction
-import org.apache.flink.streaming.api.functions.co.{CoFlatMapFunction, CoProcessFunction}
-import org.apache.flink.streaming.api.functions.sink.RichSinkFunction
+import org.apache.flink.streaming.api.functions.co.CoProcessFunction
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.scala.function.{ProcessWindowFunction, RichWindowFunction}
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows
@@ -21,7 +18,6 @@ import org.apache.flink.util.Collector
 import org.joda.time.format.DateTimeFormat
 
 import scala.collection.mutable
-import scala.collection.JavaConverters._
 import scala.util.Random
 import scala.util.control.Breaks._
 
@@ -54,14 +50,13 @@ object MF {
   var n = 0
   val pullLimit = 1500
   val iterationWaitTime = 10000
-  val env: StreamExecutionEnvironment = StreamExecutionEnvironment.getExecutionEnvironment
 
-  def epoch(ratings: DataStream[Rating]): (DataStream[Rating], DataStream[Rating]) = {
+  def epoch(ratings: DataStream[(Rating, D)]): (DataStream[(Rating, D)], DataStream[(Rating, D)]) = {
     var hasConverged = false
     val stratumStream = ratings
-      .keyBy(_.key)
+      .keyBy(_._1.key)
       .window(TumblingEventTimeWindows.of(Time.days(1)))
-      .process(new DSGD)
+      .apply(new SortSubstratums)
     val factorStream = PSOnlineMatrixFactorization.psOnlineMF(stratumStream, numFactors, rangeMin, rangeMax,
       stepSize.learningRate, n, userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism,
       iterationWaitTime)
@@ -71,7 +66,6 @@ object MF {
         val userVectors = new mutable.HashMap[UserId, Vector]
         val itemVectors = new mutable.HashMap[ItemId, Vector]
         var ratings: Seq[Rating] = Seq.empty
-        var subepoch: Int = 0
         var epoch = 0
         var epochLoss = 0.0
 
@@ -85,23 +79,13 @@ object MF {
                                      context: CoProcessFunction[Rating, Either[(UserId, Vector), (ItemId, Vector)],
                                        (Int, Double)]#Context, collector: Collector[(Int, Double)]): Unit = {
           in2 match {
-            case Left((userId, vec)) => {
-
-              /* If we meet a record with such user ID, we know that the subepoch has ended and we can calculate its
-                 loss. */
-              if (userId == -1) {
-                subepoch += 1
-                epochLoss += Utils.getLoss(userVectors, itemVectors, ratings.iterator)
-                if (subepoch == MF.workerParallelism) {
-                  subepoch = 0
-                  collector.collect(epoch, epochLoss)
-                  epoch += 1
-                }
-              }
-              else userVectors.update(userId, vec)
-            }
+            case Left((userId, vec)) => userVectors.update(userId, vec)
             case Right((itemId, vec)) => itemVectors.update(itemId, vec)
           }
+        }
+
+        override def close(): Unit = {
+          epochLoss = Utils.getLoss(userVectors, itemVectors, ratings.iterator)
         }
       })
       .keyBy(_._1)
@@ -138,6 +122,7 @@ object MF {
     val input_file_name = args(0)
     val userVector_output_name = args(1)
     val itemVector_output_name = args(2)
+    val env: StreamExecutionEnvironment = StreamExecutionEnvironment.getExecutionEnvironment
     env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
     val data = env.readTextFile(input_file_name)
     val formatter = DateTimeFormat.forPattern("dd/MM/yyyy HH:mm:ss")
@@ -195,10 +180,7 @@ object MF {
       }
     })
       .assignAscendingTimestamps(_._1.timestamp.getMillis)
-      .keyBy(_._1.key)
-      .window(TumblingEventTimeWindows.of(Time.days(1)))
-      .apply(new SortSubstratums)
-      .iterate((x: DataStream[Rating]) => epoch(x), 100)
+      .iterate((x: DataStream[(Rating, D)]) => epoch(x), 1000)
     env.execute()
   }
 }
@@ -232,7 +214,7 @@ class DSGD extends ProcessWindowFunction[Rating, Rating, Int, TimeWindow] {
     if (strategy != 0 || strategy != 1) throw IllegalArgumentException
     var s = substrategy
     val iBlocks = 0 to MF.workerParallelism
-    var uBlocks: Seq[Int] = Seq.empty[Int]
+    val uBlocks: Seq[Int] = Seq.empty[Int]
     for (i <- 0 until MF.workerParallelism) {
       uBlocks :+ s
       strategy match {
@@ -382,35 +364,20 @@ class DSGD extends ProcessWindowFunction[Rating, Rating, Int, TimeWindow] {
   }
 }
 
-///**
-//  * An operator that filters out tuples that do not belong to the stratum currently being processed.
-//  * @param blocks a set of (user block, item block) tuples, each of which defines a rectangle block in the initial
-//  *               matrix. Those blocks are called substratums and any record that belongs to them should be selected by
-//  *               this function for further processing.
-//  */
-//class StratumFilterFunction(blocks: (Seq[Int], Seq[Int])) extends RichFilterFunction[Rating] {
-//
-//  /**
-//    * We will work only with points in a selected stratum.
-//    * @param t element of a stream.
-//    * @return true if an element belongs to one of the blocks in a stratum.
-//    */
-//  override def filter(t: Rating): Boolean = {
-//    var f = false
-//    for (i <- 0 until MF.workerParallelism) {
-//      if (t.userPartition == blocks._1(i) && t.itemPartition == blocks._2(i)) {
-//        MF.stratumSize += 1
-//        f = true
-//        break
-//      }
-//    }
-//    f
-//  }
-//
-//  override def close(): Unit = MF.stratumSize = 0
-//}
 class SortSubstratums extends RichWindowFunction[(Rating, D), Rating, Int, TimeWindow] {
+  private var count: ValueState[Int] = _
 
-  override def apply(key: Int, window: TimeWindow, input: Iterable[(Rating, D)], out: Collector[Rating]): Unit =
+  override def apply(key: Int, window: TimeWindow, input: Iterable[(Rating, D)], out: Collector[Rating]): Unit = {
+    val tmpCurrentCount = count.value()
+    val currentCount = if (tmpCurrentCount != null) tmpCurrentCount else 0
+    val newCount = currentCount + input.size
+    count.update(newCount)
+    Utils.testLearningRatesOnSample(input, MF.workerParallelism, MF.learningRates, MF.stepSize)
     input.toList.sortWith(_._2 < _._2).map(x => out.collect(x._1))
+  }
+
+  override def open(parameters: Configuration): Unit =
+    count = getRuntimeContext.getState(new ValueStateDescriptor[Int]("count", createTypeInformation[Int]))
+
+  override def close(): Unit = MF.n = count.value()
 }
