@@ -7,7 +7,7 @@ import scala.collection.mutable
 import scala.util.Random
 
 class PSOnlineMatrixFactorizationWorker(numFactors: Int, rangeMin: Double, rangeMax: Double, learningRate: Double,
-                                        windowSize: Int, userMemory: Int, negativeSampleRate: Int
+                                        userMemory: Int, negativeSampleRate: Int
                                        ) extends WorkerLogic[Rating, Vector, (UserId, Vector)] {
   val factorInitDesc = RangedRandomFactorInitializerDescriptor(numFactors, rangeMin, rangeMax)
   val factorUpdate = new SGDUpdater(learningRate)
@@ -21,7 +21,7 @@ class PSOnlineMatrixFactorizationWorker(numFactors: Int, rangeMin: Double, range
     val rating = ratingBuffer synchronized ratingBuffer(paramId).dequeue()
     val user = userVectors.getOrElseUpdate(rating.user, factorInitDesc.open().nextFactor(rating.user))
     val item = paramValue
-    val (userDelta, itemDelta) = factorUpdate.delta(rating.rating, user, item, windowSize)
+    val (userDelta, itemDelta) = factorUpdate.delta(rating.rating, user, item)
     userVectors(rating.user) = vectorSum(user, userDelta)
     ps.output(rating.user, userVectors(rating.user))
     ps.push(paramId, itemDelta)

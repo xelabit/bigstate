@@ -5,10 +5,10 @@ import dima.Utils.{D, ItemId, UserId}
 import dima.{PSOnlineMatrixFactorization, Rating, SGDUpdater, StepSize, Utils}
 import dima.Vector._
 import org.apache.flink.api.common.functions.RichFlatMapFunction
-import org.apache.flink.api.common.state.{MapState, MapStateDescriptor, ValueState, ValueStateDescriptor}
+import org.apache.flink.api.common.state._
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.streaming.api.TimeCharacteristic
-import org.apache.flink.streaming.api.functions.co.CoProcessFunction
+import org.apache.flink.streaming.api.functions.co.{CoFlatMapFunction, CoProcessFunction, RichCoFlatMapFunction}
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.scala.function.{ProcessWindowFunction, RichWindowFunction}
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows
@@ -37,17 +37,7 @@ object MF {
   val maxIId = 10000
   val workerParallelism = 2
   val psParallelism = 2
-
-  /* According to DSGD this should be different for each epoch. ε0 is chosen among 1, 1/2, 1/4, ..., 1/2^(d-1), d is
-     the number of worker nodes. Each of this value is tried in parallel (on a small subset of matrix V (~0.1%). The one
-     which yields the smallest loss is chosen as ε0. If a loss decreased in the current epoch, in the next one we choose
-     again in parallel among [1/2, 2] multiplied by the current learning rate. If the loss after the epoch has
-     increased, we switch to "bold driver" algorithm: 1) increase the step size by 5% whenever the loss decreases over
-     an epoch, 2) decrease the step size by 50% if the loss increases. */
-  val stepSize = new StepSize(workerParallelism)
-  var learningRates: Seq[Double] = stepSize.makeInitialSeq()
   val learningRate = 0.01
-  var n = 0
   val pullLimit = 1500
   val iterationWaitTime = 10000
 
@@ -93,27 +83,27 @@ object MF {
       .sum(2)
       .setParallelism(1)
       .flatMap(new RichFlatMapFunction[(Int, Double), Double] {
-      var lastEpochLoss: Double = null
-      var isFirstEpoch = true
-      var isBoldDriver = false
-      val threshold = 0.01
+        var lastEpochLoss: Double = null
+        var isFirstEpoch = true
+        var isBoldDriver = false
+        val threshold = 0.01
 
-      override def flatMap(in: (ItemId, Double), collector: Collector[Double]): Unit = {
-        if (isFirstEpoch) isFirstEpoch = false
-        else if (!isBoldDriver) {
-          if (in._2 < lastEpochLoss) {
-            MF.learningRates = stepSize.getLearningRatesForNextEpoch()
-//            testLearningRatesOnSample(elements)
-          } else {
-              isBoldDriver = true
-              if (in._2 < lastEpochLoss) stepSize.incBoldDriver()
-              else stepSize.decBoldDriver()
-            }
+        override def flatMap(in: (ItemId, Double), collector: Collector[Double]): Unit = {
+          if (isFirstEpoch) isFirstEpoch = false
+          else if (!isBoldDriver) {
+            if (in._2 < lastEpochLoss) {
+              MF.learningRates = stepSize.getLearningRatesForNextEpoch()
+//              testLearningRatesOnSample(elements)
+            } else {
+                isBoldDriver = true
+                if (in._2 < lastEpochLoss) stepSize.incBoldDriver()
+                else stepSize.decBoldDriver()
+              }
+          }
+          if (abs(in._2 - lastEpochLoss) < threshold) hasConverged = true
+          else lastEpochLoss = in._2
         }
-        if (abs(in._2 - lastEpochLoss) < threshold) hasConverged = true
-        else lastEpochLoss = in._2
-      }
-    })
+      })
     if (hasConverged) (, ratings)
     else (ratings, )
   }
@@ -180,7 +170,47 @@ object MF {
       }
     })
       .assignAscendingTimestamps(_._1.timestamp.getMillis)
-      .iterate((x: DataStream[(Rating, D)]) => epoch(x), 1000)
+      .keyBy(_._1.key)
+      .window(TumblingEventTimeWindows.of(Time.days(1)))
+      .apply(new SortSubstratums)
+    val factorStream = PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate,
+      userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime)
+    val lossStream = lastFM
+      .connect(factorStream)
+      .flatMap(new RichCoFlatMapFunction[Rating, Either[(UserId, Vector), (ItemId, Vector)], (Int, Double)] {
+        private var userVectors: MapState[UserId, Vector] = _
+        private var itemVectors: MapState[UserId, Vector] = _
+        private var ratings: ListState[Rating] = _
+        private var epochLoss: ValueState[(Int, Double)] = _
+
+        override def flatMap1(in1: Rating, collector: Collector[(Int, Double)]): Unit = ratings.add(in1)
+
+        override def flatMap2(in2: Either[(UserId, Vector), (ItemId, Vector)], collector: Collector[(Int, Double)]
+                             ): Unit = {
+          in2 match {
+            case Left((userId, vec)) => userVectors.put(userId, vec)
+            case Right((itemId, vec)) => itemVectors.put(itemId, vec)
+          }
+        }
+
+        override def open(parameters: Configuration): Unit = {
+          userVectors = getRuntimeContext.getMapState(new MapStateDescriptor[UserId, Vector]("users",
+            createTypeInformation[UserId], createTypeInformation[Vector]))
+          itemVectors = getRuntimeContext.getMapState(new MapStateDescriptor[ItemId, Vector]("items",
+            createTypeInformation[ItemId], createTypeInformation[Vector]))
+          ratings = getRuntimeContext.getListState(
+            new ListStateDescriptor[Rating]("ratings", createTypeInformation[Rating])
+          )
+          epochLoss = getRuntimeContext.getState(
+            new ValueStateDescriptor[(Int, Double)]("loss", createTypeInformation[(Int, Double)])
+          )
+        }
+
+        override def close(): Unit = {
+          epochLoss = Utils.getLoss(userVectors, itemVectors, ratings.iterator)
+        }
+      })
+      .keyBy(_._1)
     env.execute()
   }
 }
@@ -365,19 +395,7 @@ class DSGD extends ProcessWindowFunction[Rating, Rating, Int, TimeWindow] {
 }
 
 class SortSubstratums extends RichWindowFunction[(Rating, D), Rating, Int, TimeWindow] {
-  private var count: ValueState[Int] = _
 
-  override def apply(key: Int, window: TimeWindow, input: Iterable[(Rating, D)], out: Collector[Rating]): Unit = {
-    val tmpCurrentCount = count.value()
-    val currentCount = if (tmpCurrentCount != null) tmpCurrentCount else 0
-    val newCount = currentCount + input.size
-    count.update(newCount)
-    Utils.testLearningRatesOnSample(input, MF.workerParallelism, MF.learningRates, MF.stepSize)
+  override def apply(key: Int, window: TimeWindow, input: Iterable[(Rating, D)], out: Collector[Rating]): Unit =
     input.toList.sortWith(_._2 < _._2).map(x => out.collect(x._1))
-  }
-
-  override def open(parameters: Configuration): Unit =
-    count = getRuntimeContext.getState(new ValueStateDescriptor[Int]("count", createTypeInformation[Int]))
-
-  override def close(): Unit = MF.n = count.value()
 }
