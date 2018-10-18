@@ -11,6 +11,7 @@ object Utils {
   type UserId = Int
   type ItemId = Int
   type D = Int
+  type W = Long
 
   // TODO: do not initialize factor matrices every time.
   /**

@@ -1,14 +1,14 @@
 import MF._
 import breeze.linalg.DenseVector
 import breeze.numerics.{abs, pow}
-import dima.Utils.{D, ItemId, UserId}
-import dima.{PSOnlineMatrixFactorization, Rating, SGDUpdater, StepSize, Utils}
+import dima.Utils.{D, ItemId, UserId, W}
+import dima.{PSOnlineMatrixFactorization, Rating, SGDUpdater, Utils}
 import dima.Vector._
 import org.apache.flink.api.common.functions.RichFlatMapFunction
 import org.apache.flink.api.common.state._
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.streaming.api.TimeCharacteristic
-import org.apache.flink.streaming.api.functions.co.{CoFlatMapFunction, CoProcessFunction, RichCoFlatMapFunction}
+import org.apache.flink.streaming.api.functions.co.{CoProcessFunction, RichCoFlatMapFunction}
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.scala.function.{ProcessWindowFunction, RichWindowFunction}
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows
@@ -18,6 +18,7 @@ import org.apache.flink.util.Collector
 import org.joda.time.format.DateTimeFormat
 
 import scala.collection.mutable
+import scala.collection.JavaConversions._
 import scala.util.Random
 import scala.util.control.Breaks._
 
@@ -177,18 +178,44 @@ object MF {
       userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime)
     val lossStream = lastFM
       .connect(factorStream)
-      .flatMap(new RichCoFlatMapFunction[Rating, Either[(UserId, Vector), (ItemId, Vector)], (Int, Double)] {
+      .flatMap(new RichCoFlatMapFunction[(Rating, W), Either[(W, UserId, Vector), (ItemId, Vector)], (Int, Double)] {
         private var userVectors: MapState[UserId, Vector] = _
         private var itemVectors: MapState[UserId, Vector] = _
         private var ratings: ListState[Rating] = _
-        private var epochLoss: ValueState[(Int, Double)] = _
+        private var ratingsBuffer: ListState[Rating] = _
+        private var epoch: ValueState[Int] = _
+        private var windowId: ValueState[Long] = _
 
-        override def flatMap1(in1: Rating, collector: Collector[(Int, Double)]): Unit = ratings.add(in1)
+        override def flatMap1(in1: (Rating, W), collector: Collector[(Int, Double)]): Unit = {
+          if (in1._2 == windowId | windowId == null) ratings.add(in1._1)
+          else ratingsBuffer.add(in1._1)
+        }
 
-        override def flatMap2(in2: Either[(UserId, Vector), (ItemId, Vector)], collector: Collector[(Int, Double)]
+        override def flatMap2(in2: Either[(W, UserId, Vector), (ItemId, Vector)], collector: Collector[(Int, Double)]
                              ): Unit = {
+          val tmpWindowId = windowId.value()
+          val tmpEpoch = epoch.value()
+          val currentEpoch = if (tmpEpoch != null) tmpEpoch else 0
           in2 match {
-            case Left((userId, vec)) => userVectors.put(userId, vec)
+            case Left((w, userId, vec)) => {
+              val currentWindowId = if (tmpWindowId != null) tmpWindowId else w
+              if (w == currentWindowId) userVectors.put(userId, vec)
+              else {
+                windowId.update(w)
+                val scalaUserMap: mutable.HashMap[UserId, Vector] = new mutable.HashMap[UserId, Vector]()
+                val scalaItemMap: mutable.HashMap[ItemId, Vector] = new mutable.HashMap[ItemId, Vector]()
+                userVectors.entries().forEach(kv => scalaUserMap.update(kv.getKey, kv.getValue))
+                itemVectors.entries().forEach(kv => scalaItemMap.update(kv.getKey, kv.getValue))
+                val scalaRatings = ratings.get().iterator()
+                val epochLoss = Utils.getLoss(scalaUserMap, scalaItemMap, scalaRatings)
+                collector.collect(currentEpoch, epochLoss)
+                epoch.update(currentEpoch + 1)
+                ratings.clear()
+                ratings = ratingsBuffer
+                ratingsBuffer.clear()
+                userVectors.put(userId, vec)
+              }
+            }
             case Right((itemId, vec)) => itemVectors.put(itemId, vec)
           }
         }
@@ -201,16 +228,19 @@ object MF {
           ratings = getRuntimeContext.getListState(
             new ListStateDescriptor[Rating]("ratings", createTypeInformation[Rating])
           )
-          epochLoss = getRuntimeContext.getState(
-            new ValueStateDescriptor[(Int, Double)]("loss", createTypeInformation[(Int, Double)])
+          ratings = getRuntimeContext.getListState(
+            new ListStateDescriptor[Rating]("temp-ratings", createTypeInformation[Rating])
           )
-        }
-
-        override def close(): Unit = {
-          epochLoss = Utils.getLoss(userVectors, itemVectors, ratings.iterator)
+          epoch = getRuntimeContext.getState(
+            new ValueStateDescriptor[Int]("loss", createTypeInformation[Int])
+          )
+          windowId = getRuntimeContext.getState(
+            new ValueStateDescriptor[Long]("window-id", createTypeInformation[Long])
+          )
         }
       })
       .keyBy(_._1)
+      .sum(1)
     env.execute()
   }
 }
@@ -394,8 +424,8 @@ class DSGD extends ProcessWindowFunction[Rating, Rating, Int, TimeWindow] {
   }
 }
 
-class SortSubstratums extends RichWindowFunction[(Rating, D), Rating, Int, TimeWindow] {
+class SortSubstratums extends RichWindowFunction[(Rating, D), (Rating, W), Int, TimeWindow] {
 
-  override def apply(key: Int, window: TimeWindow, input: Iterable[(Rating, D)], out: Collector[Rating]): Unit =
-    input.toList.sortWith(_._2 < _._2).map(x => out.collect(x._1))
+  override def apply(key: Int, window: TimeWindow, input: Iterable[(Rating, D)], out: Collector[(Rating, W)]): Unit =
+    input.toList.sortWith(_._2 < _._2).map(x => out.collect(x._1, window.getStart))
 }
