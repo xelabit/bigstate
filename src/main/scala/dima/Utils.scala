@@ -2,7 +2,10 @@ package dima
 
 import breeze.linalg.DenseVector
 import breeze.numerics.pow
-import dima.Vector.Vector
+import dima.InputTypes.Rating
+import dima.ps.Vector.Vector
+import dima.ps.factors.SGDUpdater
+import org.apache.flink.api.common.state.MapState
 
 import scala.collection.mutable
 import scala.util.Random
@@ -50,9 +53,11 @@ object Utils {
       val out = learningRates.map(x => (x, rating))
       var k = 0
       for (i <- out) {
-        val w: Vector = wMaps(k)(rating.user)
-        val h: Vector = hMaps(k)(rating.item)
-        (w, h) = sgdUpdaters(k).delta(rating.rating, w, h, sample.size)
+        var w: Vector = wMaps(k)(rating.user)
+        var h: Vector = hMaps(k)(rating.item)
+        val (w0, h0) = sgdUpdaters(k).delta(rating.rating, w, h)
+        w = w0
+        h = h0
         wMaps(k).update(rating.user, w)
         hMaps(k).update(rating.item, h)
         k += 1
@@ -94,13 +99,13 @@ object Utils {
     * @param ratings true values from matrix V.
     * @return single value of loss.
     */
-  def getLoss(w: mutable.HashMap[UserId, Vector], h: mutable.HashMap[ItemId, Vector], ratings: Iterator[Rating]
+  def getLoss(w: MapState[UserId, Vector], h: MapState[ItemId, Vector], ratings: Iterator[Rating]
              ): Double = {
     var loss = 0
     while (ratings.hasNext) {
       val rating = ratings.next()
-      val wFactor = new DenseVector(w(rating.user))
-      val hFactor = new DenseVector(h(rating.item))
+      val wFactor = new DenseVector(w.get(rating.user))
+      val hFactor = new DenseVector(h.get(rating.item))
       loss += pow(rating.rating - (wFactor dot hFactor), 2)
     }
     loss
