@@ -3,7 +3,7 @@ package dima.ps
 import breeze.linalg.DenseVector
 import breeze.numerics.pow
 import dima.InputTypes.Rating
-import dima.Utils.{ItemId, UserId, W}
+import dima.Utils._
 import dima.ps.Vector._
 import dima.ps.factors.{RangedRandomFactorInitializerDescriptor, SGDUpdater}
 
@@ -11,17 +11,17 @@ import scala.collection.mutable
 import scala.util.Random
 
 class PSOnlineMatrixFactorizationWorker(numFactors: Int, rangeMin: Double, rangeMax: Double, learningRate: Double,
-                                        userMemory: Int, negativeSampleRate: Int
+                                        userMemory: Int, negativeSampleRate: Int, maxItemId: Int, parallelism: Int
                                        ) extends WorkerLogic[(Rating, W), (ItemId, Int), Vector, (W, Double)] {
   val factorInitDesc = RangedRandomFactorInitializerDescriptor(numFactors, rangeMin, rangeMax)
-  val factorUpdate = new SGDUpdater(learningRate)
-  val userVectors = new mutable.HashMap[UserId, Vector]
-  val userLosses = new mutable.HashMap[UserId, Double]
-  val ratingBuffer = new mutable.HashMap[ItemId, mutable.Queue[(Rating, W)]]()
-  val itemIds = new mutable.ArrayBuffer[ItemId]
-  val seenItemsSet = new mutable.HashMap[UserId, mutable.HashSet[ItemId]]
   val seenItemsQueue = new mutable.HashMap[UserId, mutable.Queue[ItemId]]
   var currentWindow = 0.0
+  val factorUpdate = new SGDUpdater(learningRate)
+  val ratingBuffer = new mutable.HashMap[ItemId, mutable.Queue[(Rating, W)]]()
+  val seenItemsSet = new mutable.HashMap[UserId, mutable.HashSet[ItemId]]
+  val userVectors = new mutable.HashMap[UserId, Vector]
+  val userLosses = new mutable.HashMap[UserId, Double]
+  val itemIds = new mutable.ArrayBuffer[ItemId]
 
   def onPullRecv(paramId: (ItemId, Int), paramValue: Vector,
                  ps: ParameterServerClient[(ItemId, Int), Vector, (W, Double)]): Unit = {
@@ -52,7 +52,7 @@ class PSOnlineMatrixFactorizationWorker(numFactors: Int, rangeMin: Double, range
         while (seenSet contains randomItemId) randomItemId = itemIds(Random.nextInt(itemIds.size))
         ratingBuffer(randomItemId).enqueue((Rating(data._1.key, data._1.user, randomItemId, 0, data._1.timestamp,
           data._1.userPartition, data._1.itemPartition), data._2))
-        ps.pull(randomItemId)
+        ps.pull(randomItemId, partitionId(randomItemId, maxItemId, parallelism))
       }
       ratingBuffer.getOrElseUpdate(
         data._1.item,

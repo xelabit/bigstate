@@ -6,7 +6,7 @@ class SimplePSLogic[Id, P](paramInit: => Id => P, paramUpdate: => (P, P) => P)
   extends ParameterServerLogic[Id, P, (Id, P)] {
   val params = new mutable.HashMap[Id, P]()
 
-  @transient lazy val init: (Id) => P = paramInit
+  @transient lazy val init: Id => P = paramInit
   @transient lazy val update: (P, P) => P = paramUpdate
 
   override def onPullRecv(id: Id, workerPartitionIndex: Int, ps: ParameterServer[Id, P, (Id, P)]): Unit =

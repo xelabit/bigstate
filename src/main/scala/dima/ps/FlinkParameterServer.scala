@@ -1,5 +1,6 @@
 package dima.ps
 
+import dima.Utils.ItemId
 import dima.ps.receiver._
 import dima.ps.sender._
 import org.apache.flink.api.common.functions.{Partitioner, RichFlatMapFunction, RuntimeContext}
@@ -23,15 +24,15 @@ object FlinkParameterServer {
                                                                 tiPSOut: TypeInformation[PSOut],
                                                                 tiWOut: TypeInformation[WOut]
                                                                ): DataStream[Either[WOut, PSOut]] = {
-    val hashFunc: Any => Int = x => Math.abs(x.hashCode())
+    val hashFunc: Id => Int = x => x.asInstanceOf[(ItemId, Int)]._2
 
     /* The partiton of item factor vectors should be happening in another way, i.e. according to the itemPartition field
        of a Rating tuple. */
     val workerToPSPartitioner: WorkerToPS[Id, P] => Int = {
       case WorkerToPS(_, msg) =>
         msg match {
-          case Left(Pull(pId)) => hashFunc(pId) % psParallelism
-          case Right(Push(pId, _)) => hashFunc(pId) % psParallelism
+          case Left(Pull(pId)) => hashFunc(pId)
+          case Right(Push(pId, _)) => hashFunc(pId)
         }
     }
     val psToWorkerPartitioner: PSToWorker[Id, P] => Int = {

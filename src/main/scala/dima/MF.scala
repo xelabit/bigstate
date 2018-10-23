@@ -1,6 +1,6 @@
 package dima
 
-import dima.Utils.{D, ItemId, UserId, W}
+import dima.Utils._
 import dima.InputTypes.Rating
 import dima.ps.PSOnlineMatrixFactorization
 import dima.ps.Vector._
@@ -30,8 +30,6 @@ object MF {
   val rangeMax = 0.1
   val userMemory = 128
   val negativeSampleRate = 9
-
-  // TODO: replace 10000 with real values.
   val maxUId = 573
   val maxIId = 875
   val workerParallelism = 2
@@ -50,41 +48,6 @@ object MF {
     val formatter = DateTimeFormat.forPattern("dd/MM/yyyy HH:mm:ss")
     val lastFM = data.flatMap(new RichFlatMapFunction[String, (Rating, D)] {
 
-      def getHash(x: Int, partition: Int, flag: Boolean, partitionSize: Int, leftover: Int): Int = {
-        var f = flag
-        var p = partition
-        var ps = partitionSize
-        var l = leftover
-        if (f) {
-          ps += 1
-          l -= 1
-        }
-        if (l > 0) f = true
-        if (x <= ps) p
-        else {
-          ps -= 1
-          ps += ps
-          p += 1
-          getHash(x, p, f, ps, l)
-        }
-      }
-
-      /**
-        * Get the number of a block (substratum), to which a record should be assigned.
-        * @param id user/item id of a point.
-        * @param maxId largest user/item id. We assume we know this value in advance. However, this is not usually the
-        *              case in endless stream tasks.
-        * @param n a size of parallelism.
-        * @return an id of a substratum along user or item axis.
-        */
-      def partitionId(id: Int, maxId: Int, n: Int): Int = {
-        val partitionSize = maxId / n
-        val leftover = maxId - partitionSize * n
-        val flag = leftover == 0
-        if (id < maxId) getHash(id, 0, flag, partitionSize, leftover)
-        else -1
-      }
-
       override def flatMap(value: String, out: Collector[(Rating, D)]): Unit = {
         var distance = 0
         val fieldsArray = value.split(",")
@@ -92,7 +55,7 @@ object MF {
         val iid = fieldsArray(2).toInt
         val userPartition = partitionId(uid, maxUId, workerParallelism)
         val itemPartition = partitionId(iid, maxIId, workerParallelism)
-        val key = uid match {
+        val key = userPartition match {
           case 0 => 0
           case 1 => 2
         }
@@ -109,70 +72,85 @@ object MF {
       .keyBy(_._1.key)
       .window(TumblingEventTimeWindows.of(Time.days(1)))
       .apply(new SortSubstratums)
-    val factorStream = PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate,
-      userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime)
-    lastFM
-      .connect(factorStream)
-      .flatMap(new RichCoFlatMapFunction[(Rating, W), Either[(W, UserId, Vector), (ItemId, Vector)], (Int, Double)] {
-        private var userVectors: MapState[UserId, Vector] = _
-        private var itemVectors: MapState[ItemId, Vector] = _
-        private var ratings: ListState[Rating] = _
-        private var ratingsBuffer: ListState[Rating] = _
-        private var epoch: ValueState[Int] = _
-        private var windowId: ValueState[Long] = _
+    PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate, userMemory,
+      negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime, MF.maxIId)
+        .flatMap(new RichFlatMapFunction[Either[(W, Double), ((ItemId, Int), Vector)], (W, Double)] {
 
-        override def flatMap1(in1: (Rating, W), collector: Collector[(Int, Double)]): Unit = {
-          if (in1._2 == windowId.value() | windowId == null) ratings.add(in1._1)
-          else ratingsBuffer.add(in1._1)
-        }
-
-        override def flatMap2(in2: Either[(W, Double), (ItemId, Vector)], collector: Collector[(Int, Double)]
-                             ): Unit = {
-          val tmpWindowId = windowId.value()
-          val tmpEpoch = epoch.value()
-          val currentEpoch = if (tmpEpoch != null) tmpEpoch else 0
-          in2 match {
-            case Left((w, userId, vec)) => {
-              val currentWindowId = if (tmpWindowId != null) tmpWindowId else w
-              if (w == currentWindowId) userVectors.put(userId, vec)
-              else {
-                windowId.update(w)
-                val scalaRatings = ratings.get().iterator()
-                val epochLoss = Utils.getLoss(userVectors, itemVectors, scalaRatings)
-                collector.collect(currentEpoch, epochLoss)
-                epoch.update(currentEpoch + 1)
-                ratings.clear()
-                ratings = ratingsBuffer
-                ratingsBuffer.clear()
-                userVectors.put(userId, vec)
-              }
+          override def flatMap(in: Either[(W, Double), ((ItemId, Int), Vector)], collector: Collector[(W, Double)]
+                              ): Unit = {
+            in match {
+              case Left((window, loss)) => collector.collect((window, loss))
+              case _ => None
             }
-            case Right((itemId, vec)) => itemVectors.put(itemId, vec)
           }
-        }
-
-        override def open(parameters: Configuration): Unit = {
-          userVectors = getRuntimeContext.getMapState(new MapStateDescriptor[UserId, Vector]("users",
-            createTypeInformation[UserId], createTypeInformation[Vector]))
-          itemVectors = getRuntimeContext.getMapState(new MapStateDescriptor[ItemId, Vector]("items",
-            createTypeInformation[ItemId], createTypeInformation[Vector]))
-          ratings = getRuntimeContext.getListState(
-            new ListStateDescriptor[Rating]("ratings", createTypeInformation[Rating])
-          )
-          ratings = getRuntimeContext.getListState(
-            new ListStateDescriptor[Rating]("temp-ratings", createTypeInformation[Rating])
-          )
-          epoch = getRuntimeContext.getState(
-            new ValueStateDescriptor[Int]("loss", createTypeInformation[Int])
-          )
-          windowId = getRuntimeContext.getState(
-            new ValueStateDescriptor[Long]("window-id", createTypeInformation[Long])
-          )
-        }
-      })
-      .keyBy(_._1)
-      .sum(1)
-      .print()
+        })
+        .keyBy(0)
+        .sum(1)
+        .print()
+//    val factorStream = PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate,
+//      userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime, MF.maxIId)
+//    lastFM
+//      .connect(factorStream)
+//      .flatMap(new RichCoFlatMapFunction[(Rating, W), Either[(W, UserId, Vector), (ItemId, Vector)], (Int, Double)] {
+//        private var userVectors: MapState[UserId, Vector] = _
+//        private var itemVectors: MapState[ItemId, Vector] = _
+//        private var ratings: ListState[Rating] = _
+//        private var ratingsBuffer: ListState[Rating] = _
+//        private var epoch: ValueState[Int] = _
+//        private var windowId: ValueState[Long] = _
+//
+//        override def flatMap1(in1: (Rating, W), collector: Collector[(Int, Double)]): Unit = {
+//          if (in1._2 == windowId.value() | windowId == null) ratings.add(in1._1)
+//          else ratingsBuffer.add(in1._1)
+//        }
+//
+//        override def flatMap2(in2: Either[(W, Double), (ItemId, Vector)], collector: Collector[(Int, Double)]
+//                             ): Unit = {
+//          val tmpWindowId = windowId.value()
+//          val tmpEpoch = epoch.value()
+//          val currentEpoch = if (tmpEpoch != null) tmpEpoch else 0
+//          in2 match {
+//            case Left((w, userId, vec)) => {
+//              val currentWindowId = if (tmpWindowId != null) tmpWindowId else w
+//              if (w == currentWindowId) userVectors.put(userId, vec)
+//              else {
+//                windowId.update(w)
+//                val scalaRatings = ratings.get().iterator()
+//                val epochLoss = Utils.getLoss(userVectors, itemVectors, scalaRatings)
+//                collector.collect(currentEpoch, epochLoss)
+//                epoch.update(currentEpoch + 1)
+//                ratings.clear()
+//                ratings = ratingsBuffer
+//                ratingsBuffer.clear()
+//                userVectors.put(userId, vec)
+//              }
+//            }
+//            case Right((itemId, vec)) => itemVectors.put(itemId, vec)
+//          }
+//        }
+//
+//        override def open(parameters: Configuration): Unit = {
+//          userVectors = getRuntimeContext.getMapState(new MapStateDescriptor[UserId, Vector]("users",
+//            createTypeInformation[UserId], createTypeInformation[Vector]))
+//          itemVectors = getRuntimeContext.getMapState(new MapStateDescriptor[ItemId, Vector]("items",
+//            createTypeInformation[ItemId], createTypeInformation[Vector]))
+//          ratings = getRuntimeContext.getListState(
+//            new ListStateDescriptor[Rating]("ratings", createTypeInformation[Rating])
+//          )
+//          ratings = getRuntimeContext.getListState(
+//            new ListStateDescriptor[Rating]("temp-ratings", createTypeInformation[Rating])
+//          )
+//          epoch = getRuntimeContext.getState(
+//            new ValueStateDescriptor[Int]("loss", createTypeInformation[Int])
+//          )
+//          windowId = getRuntimeContext.getState(
+//            new ValueStateDescriptor[Long]("window-id", createTypeInformation[Long])
+//          )
+//        }
+//      })
+//      .keyBy(_._1)
+//      .sum(1)
+//      .print()
     env.execute()
   }
 }
