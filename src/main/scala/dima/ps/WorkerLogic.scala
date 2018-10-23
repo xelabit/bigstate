@@ -2,30 +2,31 @@ package dima.ps
 
 import scala.collection.mutable
 
-trait WorkerLogic[T, P, WOut] extends Serializable {
+trait WorkerLogic[T, Id, P, WOut] extends Serializable {
 
   def open(): Unit = {}
 
-  def onRecv(data: T, ps: ParameterServerClient[P, WOut]): Unit
+  def onRecv(data: T, ps: ParameterServerClient[Id, P, WOut]): Unit
 
-  def onPullRecv(paramId: Int, paramValue: P, ps: ParameterServerClient[P, WOut]): Unit
+  def onPullRecv(paramId: Id, paramValue: P, ps: ParameterServerClient[Id, P, WOut]): Unit
 
   def close(): Unit = ()
 }
 
 object WorkerLogic {
-  def addPullLimiter[T, P, WOut](workerLogic: WorkerLogic[T, P, WOut], pullLimit: Int): WorkerLogic[T, P, WOut] = {
-    new WorkerLogic[T, P, WOut] {
+  def addPullLimiter[T, Id, P, WOut](workerLogic: WorkerLogic[T, Id, P, WOut], pullLimit: Int
+                                    ): WorkerLogic[T, Id, P, WOut] = {
+    new WorkerLogic[T, Id, P, WOut] {
       private var pullCounter = 0
-      private val pullQueue = mutable.Queue[Int]()
-      val wrappedPS = new ParameterServerClient[P, WOut] {
-        private var ps: ParameterServerClient[P, WOut] = _
+      private val pullQueue = mutable.Queue[Id]()
+      val wrappedPS = new ParameterServerClient[Id, P, WOut] {
+        private var ps: ParameterServerClient[Id, P, WOut] = _
         
-        def setPS(ps: ParameterServerClient[P, WOut]): Unit = {
+        def setPS(ps: ParameterServerClient[Id, P, WOut]): Unit = {
           this.ps = ps
         }
 
-        override def pull(id: Int): Unit = {
+        override def pull(id: Id): Unit = {
           if (pullCounter < pullLimit) {
             pullCounter += 1
             ps.pull(id)
@@ -34,7 +35,7 @@ object WorkerLogic {
           }
         }
 
-        override def push(id: Int, deltaUpdate: P): Unit = {
+        override def push(id: Id, deltaUpdate: P): Unit = {
           ps.push(id, deltaUpdate)
         }
 
@@ -43,12 +44,12 @@ object WorkerLogic {
         }
       }
 
-      override def onRecv(data: T, ps: ParameterServerClient[P, WOut]): Unit = {
+      override def onRecv(data: T, ps: ParameterServerClient[Id, P, WOut]): Unit = {
         wrappedPS.setPS(ps)
         workerLogic.onRecv(data, wrappedPS)
       }
 
-      override def onPullRecv(paramId: Int, paramValue: P, ps: ParameterServerClient[P, WOut]): Unit = {
+      override def onPullRecv(paramId: Id, paramValue: P, ps: ParameterServerClient[Id, P, WOut]): Unit = {
         wrappedPS.setPS(ps)
         workerLogic.onPullRecv(paramId, paramValue, wrappedPS)
         pullCounter -= 1

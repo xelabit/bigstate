@@ -15,55 +15,61 @@ class FlinkParameterServer
 object FlinkParameterServer {
   private val log = LoggerFactory.getLogger(classOf[FlinkParameterServer])
 
-  def transform[T, P, PSOut, WOut](trainingData: DataStream[T], workerLogic: WorkerLogic[T, P, WOut],
-                                   psLogic: ParameterServerLogic[P, PSOut], workerParallelism: Int, psParallelism: Int,
-                                   iterationWaitTime: Long)(implicit tiT: TypeInformation[T], tiP: TypeInformation[P],
-                                   tiPSOut: TypeInformation[PSOut], tiWOut: TypeInformation[WOut]):
-  DataStream[Either[WOut, PSOut]] = {
+  def transform[T, Id, P, PSOut, WOut](trainingData: DataStream[T], workerLogic: WorkerLogic[T, Id, P, WOut],
+                                       psLogic: ParameterServerLogic[Id, P, PSOut], workerParallelism: Int,
+                                       psParallelism: Int,
+                                       iterationWaitTime: Long)(implicit tiT: TypeInformation[T],
+                                                                tiId: TypeInformation[Id], tiP: TypeInformation[P],
+                                                                tiPSOut: TypeInformation[PSOut],
+                                                                tiWOut: TypeInformation[WOut]
+                                                               ): DataStream[Either[WOut, PSOut]] = {
     val hashFunc: Any => Int = x => Math.abs(x.hashCode())
 
     /* The partiton of item factor vectors should be happening in another way, i.e. according to the itemPartition field
        of a Rating tuple. */
-    val workerToPSPartitioner: WorkerToPS[P] => Int = {
+    val workerToPSPartitioner: WorkerToPS[Id, P] => Int = {
       case WorkerToPS(_, msg) =>
         msg match {
           case Left(Pull(pId)) => hashFunc(pId) % psParallelism
           case Right(Push(pId, _)) => hashFunc(pId) % psParallelism
         }
     }
-    val psToWorkerPartitioner: PSToWorker[P] => Int = {
+    val psToWorkerPartitioner: PSToWorker[Id, P] => Int = {
       case PSToWorker(workerPartitionIndex, _) => workerPartitionIndex
     }
-    transform1[T, P, PSOut, WOut, PSToWorker[P], WorkerToPS[P]](trainingData, workerLogic, psLogic,
-      workerToPSPartitioner, psToWorkerPartitioner, workerParallelism, psParallelism, new SimpleWorkerReceiver[P],
-      new SimpleWorkerSender[P], new SimplePSReceiver[P], new SimplePSSender[P], iterationWaitTime)
+    transform1[T, Id, P, PSOut, WOut, PSToWorker[Id, P], WorkerToPS[Id, P]](trainingData, workerLogic, psLogic,
+      workerToPSPartitioner, psToWorkerPartitioner, workerParallelism, psParallelism, new SimpleWorkerReceiver[Id, P],
+      new SimpleWorkerSender[Id, P], new SimplePSReceiver[Id, P], new SimplePSSender[Id, P], iterationWaitTime)
   }
 
-  def transform1[T, P, PSOut, WOut, PStoWorker, WorkerToPS](trainingData: DataStream[T],
-                                                           workerLogic: WorkerLogic[T, P, WOut],
-                                                           psLogic: ParameterServerLogic[P, PSOut],
-                                                           paramPartitioner: WorkerToPS => Int,
-                                                           wInPartition: PStoWorker => Int, workerParallelism: Int,
-                                                           psParallelism: Int,
-                                                           workerReceiver: WorkerReceiver[PStoWorker, P],
-                                                           workerSender: WorkerSender[WorkerToPS, P],
-                                                           psReceiver: PSReceiver[WorkerToPS, P],
-                                                           psSender: PSSender[PStoWorker, P], iterationWaitTime: Long)
-                                                          (implicit tiT: TypeInformation[T], tiP: TypeInformation[P],
-                                                           tiPSOut: TypeInformation[PSOut],
-                                                           tiWOut: TypeInformation[WOut],
-                                                           tiWorkerIn: TypeInformation[PStoWorker],
-                                                           tiWorkerOut: TypeInformation[WorkerToPS]
-                                                          ): DataStream[Either[WOut, PSOut]] = {
+  def transform1[T, Id, P, PSOut, WOut, PStoWorker, WorkerToPS](trainingData: DataStream[T],
+                                                                workerLogic: WorkerLogic[T, Id, P, WOut],
+                                                                psLogic: ParameterServerLogic[Id, P, PSOut],
+                                                                paramPartitioner: WorkerToPS => Int,
+                                                                wInPartition: PStoWorker => Int, workerParallelism: Int,
+                                                                psParallelism: Int,
+                                                                workerReceiver: WorkerReceiver[PStoWorker, Id, P],
+                                                                workerSender: WorkerSender[WorkerToPS, Id, P],
+                                                                psReceiver: PSReceiver[WorkerToPS, Id, P],
+                                                                psSender: PSSender[PStoWorker, Id, P],
+                                                                iterationWaitTime: Long)
+                                                               (implicit tiT: TypeInformation[T],
+                                                                tiId: TypeInformation[Id],
+                                                                tiP: TypeInformation[P],
+                                                                tiPSOut: TypeInformation[PSOut],
+                                                                tiWOut: TypeInformation[WOut],
+                                                                tiWorkerIn: TypeInformation[PStoWorker],
+                                                                tiWorkerOut: TypeInformation[WorkerToPS]
+                                                               ): DataStream[Either[WOut, PSOut]] = {
     def stepFunc(workerIn: ConnectedStreams[T, PStoWorker]
                 ): (DataStream[PStoWorker], DataStream[Either[WOut, PSOut]]) = {
       val worker = workerIn
         .flatMap(
           new RichCoFlatMapFunction[T, PStoWorker, Either[WorkerToPS, WOut]] {
-            val receiver: WorkerReceiver[PStoWorker, P] = workerReceiver
-            val sender: WorkerSender[WorkerToPS, P] = workerSender
-            val logic: WorkerLogic[T, P, WOut] = workerLogic
-            val psClient = new MessagingPSClient[PStoWorker, WorkerToPS, P, WOut](sender)
+            val receiver: WorkerReceiver[PStoWorker, Id, P] = workerReceiver
+            val sender: WorkerSender[WorkerToPS, Id, P] = workerSender
+            val logic: WorkerLogic[T, Id, P, WOut] = workerLogic
+            val psClient = new MessagingPSClient[PStoWorker, WorkerToPS, Id, P, WOut](sender)
 
             override def open(parameters: Configuration): Unit = {
               logic.open()
@@ -106,10 +112,10 @@ object FlinkParameterServer {
           override def partition(key: Int, numPartitions: Int): Int = key % numPartitions
         }, paramPartitioner)
         .flatMap(new RichFlatMapFunction[WorkerToPS, Either[PStoWorker, PSOut]] {
-          val logic: ParameterServerLogic[P, PSOut] = psLogic
-          val receiver: PSReceiver[WorkerToPS, P] = psReceiver
-          val sender: PSSender[PStoWorker, P] = psSender
-          val ps = new MessagingPS[PStoWorker, WorkerToPS, P, PSOut](sender)
+          val logic: ParameterServerLogic[Id, P, PSOut] = psLogic
+          val receiver: PSReceiver[WorkerToPS, Id, P] = psReceiver
+          val sender: PSSender[PStoWorker, Id, P] = psSender
+          val ps = new MessagingPS[PStoWorker, WorkerToPS, Id, P, PSOut](sender)
 
           override def flatMap(msg: WorkerToPS, out: Collector[Either[PStoWorker, PSOut]]): Unit = {
             log.debug(s"Pull request or push msg @ PS: $msg")
@@ -158,8 +164,8 @@ object FlinkParameterServer {
       .iterate((x: ConnectedStreams[T, PStoWorker]) => stepFunc(x), iterationWaitTime)
   }
 
-  private class MessagingPS[WorkerIn, WorkerOut, P, PSOut](psSender: PSSender[WorkerIn, P])
-    extends ParameterServer[P, PSOut] {
+  private class MessagingPS[WorkerIn, WorkerOut, Id, P, PSOut](psSender: PSSender[WorkerIn, Id, P])
+    extends ParameterServer[Id, P, PSOut] {
 
     private var collector: Collector[Either[WorkerIn, PSOut]] = _
 
@@ -167,15 +173,15 @@ object FlinkParameterServer {
 
     def collectAnswerMsg(msg: WorkerIn): Unit = collector.collect(Left(msg))
 
-    override def answerPull(id: Int, value: P, workerPartitionIndex: Int): Unit = {
+    override def answerPull(id: Id, value: P, workerPartitionIndex: Int): Unit = {
       psSender.onPullAnswer(id, value, workerPartitionIndex, collectAnswerMsg)
     }
 
     override def output(out: PSOut): Unit = collector.collect(Right(out))
   }
 
-  private class MessagingPSClient[IN, OUT, P, WOut](sender: WorkerSender[OUT, P]
-                                                   ) extends ParameterServerClient[P, WOut] {
+  private class MessagingPSClient[IN, OUT, Id, P, WOut](sender: WorkerSender[OUT, Id, P])
+    extends ParameterServerClient[Id, P, WOut] {
     private var collector: Collector[Either[OUT, WOut]] = _
     private var partitionId: Int = -1
 
@@ -185,50 +191,50 @@ object FlinkParameterServer {
 
     def collectPullMsg(msg: OUT): Unit = collector.collect(Left(msg))
 
-    override def pull(id: Int): Unit = sender.onPull(id, collectPullMsg, partitionId)
+    override def pull(id: Id): Unit = sender.onPull(id, collectPullMsg, partitionId)
 
-    override def push(id: Int, deltaUpdate: P): Unit = sender.onPush(id, deltaUpdate, collectPullMsg, partitionId)
+    override def push(id: Id, deltaUpdate: P): Unit = sender.onPush(id, deltaUpdate, collectPullMsg, partitionId)
 
     override def output(out: WOut): Unit = collector.collect(Right(out))
   }
 }
 
-trait ParameterServerLogic[P, PSOut] extends Serializable {
+trait ParameterServerLogic[Id, P, PSOut] extends Serializable {
 
-  def onPullRecv(id: Int, workerPartitionIndex: Int, ps: ParameterServer[P, PSOut]): Unit
+  def onPullRecv(id: Id, workerPartitionIndex: Int, ps: ParameterServer[Id, P, PSOut]): Unit
 
-  def onPushRecv(id: Int, deltaUpdate: P, ps: ParameterServer[P, PSOut]): Unit
+  def onPushRecv(id: Id, deltaUpdate: P, ps: ParameterServer[Id, P, PSOut]): Unit
 
-  def close(ps: ParameterServer[P, PSOut]): Unit = ()
+  def close(ps: ParameterServer[Id, P, PSOut]): Unit = ()
 
   def open(parameters: Configuration, runtimeContext: RuntimeContext): Unit = ()
 }
 
-trait ParameterServer[P, PSOut] extends Serializable {
+trait ParameterServer[Id, P, PSOut] extends Serializable {
 
-  def answerPull(id: Int, value: P, workerPartitionIndex: Int): Unit
+  def answerPull(id: Id, value: P, workerPartitionIndex: Int): Unit
 
   def output(out: PSOut): Unit
 }
 
-trait PSReceiver[WorkerToPS, P] extends Serializable {
+trait PSReceiver[WorkerToPS, Id, P] extends Serializable {
 
-  def onWorkerMsg(msg: WorkerToPS, onPullRecv: (Int, Int) => Unit, onPushRecv: (Int, P) => Unit)
+  def onWorkerMsg(msg: WorkerToPS, onPullRecv: (Id, Int) => Unit, onPushRecv: (Id, P) => Unit)
 }
 
-trait PSSender[PStoWorker, P] extends Serializable {
+trait PSSender[PStoWorker, Id, P] extends Serializable {
 
-  def onPullAnswer(id: Int, value: P, workerPartitionIndex: Int, collectAnswerMsg: PStoWorker => Unit)
+  def onPullAnswer(id: Id, value: P, workerPartitionIndex: Int, collectAnswerMsg: PStoWorker => Unit)
 }
 
-trait WorkerReceiver[PStoWorker, P] extends Serializable {
+trait WorkerReceiver[PStoWorker, Id, P] extends Serializable {
 
-  def onPullAnswerRecv(msg: PStoWorker, pullHandler: PullAnswer[P] => Unit)
+  def onPullAnswerRecv(msg: PStoWorker, pullHandler: PullAnswer[Id, P] => Unit)
 }
 
-trait WorkerSender[WorkerToPS, P] extends Serializable {
+trait WorkerSender[WorkerToPS, Id, P] extends Serializable {
 
-  def onPull(id: Int, collectAnswerMsg: WorkerToPS => Unit, partitionId: Int)
+  def onPull(id: Id, collectAnswerMsg: WorkerToPS => Unit, partitionId: Int)
 
-  def onPush(id: Int, deltaUpdate: P, collectAnswerMsg: WorkerToPS => Unit, partitionId: Int)
+  def onPush(id: Id, deltaUpdate: P, collectAnswerMsg: WorkerToPS => Unit, partitionId: Int)
 }

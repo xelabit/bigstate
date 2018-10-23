@@ -126,7 +126,7 @@ object MF {
           else ratingsBuffer.add(in1._1)
         }
 
-        override def flatMap2(in2: Either[(W, UserId, Vector), (ItemId, Vector)], collector: Collector[(Int, Double)]
+        override def flatMap2(in2: Either[(W, Double), (ItemId, Vector)], collector: Collector[(Int, Double)]
                              ): Unit = {
           val tmpWindowId = windowId.value()
           val tmpEpoch = epoch.value()

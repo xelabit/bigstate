@@ -2,8 +2,8 @@ package dima.ps.receiver
 
 import dima.ps.{PSToWorker, PullAnswer, WorkerReceiver}
 
-class SimpleWorkerReceiver[P] extends WorkerReceiver[PSToWorker[P], P] {
+class SimpleWorkerReceiver[Id, P] extends WorkerReceiver[PSToWorker[Id, P], Id, P] {
 
-  override def onPullAnswerRecv(msg: PSToWorker[P], pullHandler: PullAnswer[P] => Unit): Unit =
+  override def onPullAnswerRecv(msg: PSToWorker[Id, P], pullHandler: PullAnswer[Id, P] => Unit): Unit =
     msg match { case PSToWorker(_, pullAns) => pullHandler(pullAns) }
 }

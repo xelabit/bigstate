@@ -12,7 +12,7 @@ import scala.util.Random
 
 class PSOnlineMatrixFactorizationWorker(numFactors: Int, rangeMin: Double, rangeMax: Double, learningRate: Double,
                                         userMemory: Int, negativeSampleRate: Int
-                                       ) extends WorkerLogic[(Rating, W), Vector, (W, Double)] {
+                                       ) extends WorkerLogic[(Rating, W), (ItemId, Int), Vector, (W, Double)] {
   val factorInitDesc = RangedRandomFactorInitializerDescriptor(numFactors, rangeMin, rangeMax)
   val factorUpdate = new SGDUpdater(learningRate)
   val userVectors = new mutable.HashMap[UserId, Vector]
@@ -23,26 +23,24 @@ class PSOnlineMatrixFactorizationWorker(numFactors: Int, rangeMin: Double, range
   val seenItemsQueue = new mutable.HashMap[UserId, mutable.Queue[ItemId]]
   var currentWindow = 0.0
 
-  def onPullRecv(paramId: ItemId, paramValue: Vector, ps: ParameterServerClient[Vector, (W, Double)]): Unit = {
-    val rating = ratingBuffer synchronized ratingBuffer(paramId).dequeue()
+  def onPullRecv(paramId: (ItemId, Int), paramValue: Vector,
+                 ps: ParameterServerClient[(ItemId, Int), Vector, (W, Double)]): Unit = {
+    val rating = ratingBuffer synchronized ratingBuffer(paramId._1).dequeue()
     val user = userVectors.getOrElseUpdate(rating._1.user, factorInitDesc.open().nextFactor(rating._1.user))
     var item = paramValue
     val (userDelta, itemDelta) = factorUpdate.delta(rating._1.rating, user, item)
     userVectors(rating._1.user) = vectorSum(user, userDelta)
     item = vectorSum(item, itemDelta)
     if (currentWindow == 0.0) currentWindow = rating._2
-    else if (currentWindow < rating._2) ps.output(rating._2, userLosses.values.sum)
-    else {
-      val wFactor = new DenseVector(userVectors(rating._1.user))
-      val hFactor = new DenseVector(item)
-      userLosses(rating._1.user) = pow(rating._1.rating - (wFactor dot hFactor), 2)
+    else if (currentWindow < rating._2) {
+      ps.output(rating._2, userLosses.values.sum)
+      userLosses(rating._1.user) = getLoss(userVectors(rating._1.user), item, rating._1.rating)
     }
-
-    // extra hash map for losses for each user
+    else userLosses(rating._1.user) = getLoss(userVectors(rating._1.user), item, rating._1.rating)
     ps.push(paramId, itemDelta)
   }
 
-  def onRecv(data: (Rating, W), ps: ParameterServerClient[Vector, (W, Double)]): Unit = {
+  def onRecv(data: (Rating, W), ps: ParameterServerClient[(ItemId, Int), Vector, (W, Double)]): Unit = {
     val seenSet = seenItemsSet.getOrElseUpdate(data._1.user, new mutable.HashSet)
     val seenQueue = seenItemsQueue.getOrElseUpdate(data._1.user, new mutable.Queue)
     if (seenQueue.length >= userMemory) seenSet -= seenQueue.dequeue()
@@ -63,6 +61,12 @@ class PSOnlineMatrixFactorizationWorker(numFactors: Int, rangeMin: Double, range
           mutable.Queue[(Rating, W)]()
         }).enqueue(data)
     }
-    ps.pull(data._1.item)
+    ps.pull(data._1.item, data._1.itemPartition)
+  }
+
+  def getLoss(w: Vector, h: Vector, r: Double): Double = {
+    val wFactor = new DenseVector(w)
+    val hFactor = new DenseVector(h)
+    pow(r - (wFactor dot hFactor), 2)
   }
 }
