@@ -45,7 +45,7 @@ object MF {
     env.setParallelism(2)
     env.setMaxParallelism(2)
     val data = env.readTextFile(input_file_name)
-    val formatter = DateTimeFormat.forPattern("dd/MM/yyyy HH:mm:ss")
+    val formatter = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss")
     val lastFM = data.flatMap(new RichFlatMapFunction[String, (Rating, D)] {
 
       override def flatMap(value: String, out: Collector[(Rating, D)]): Unit = {

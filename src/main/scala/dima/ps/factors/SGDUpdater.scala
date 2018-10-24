@@ -1,6 +1,6 @@
 package dima.ps.factors
 
-class SGDUpdater(learningRate: Double) {
+class SGDUpdater(learningRate: Double) extends Serializable {
 
   /**
     * SGD for Matrix Factorization.
