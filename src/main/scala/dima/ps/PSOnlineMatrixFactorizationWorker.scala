@@ -15,7 +15,7 @@ class PSOnlineMatrixFactorizationWorker(numFactors: Int, rangeMin: Double, range
                                        ) extends WorkerLogic[(Rating, W), (ItemId, Int), Vector, (W, Double)] {
   val factorInitDesc = RangedRandomFactorInitializerDescriptor(numFactors, rangeMin, rangeMax)
   val seenItemsQueue = new mutable.HashMap[UserId, mutable.Queue[ItemId]]
-  var currentWindow = 0.0
+  var currentWindow = 0L
   val factorUpdate = new SGDUpdater(learningRate)
   val ratingBuffer = new mutable.HashMap[ItemId, mutable.Queue[(Rating, W)]]()
   val seenItemsSet = new mutable.HashMap[UserId, mutable.HashSet[ItemId]]
@@ -31,9 +31,10 @@ class PSOnlineMatrixFactorizationWorker(numFactors: Int, rangeMin: Double, range
     val (userDelta, itemDelta) = factorUpdate.delta(rating._1.rating, user, item)
     userVectors(rating._1.user) = vectorSum(user, userDelta)
     item = vectorSum(item, itemDelta)
-    if (currentWindow == 0.0) currentWindow = rating._2
+    if (currentWindow == 0L) currentWindow = rating._2
     else if (currentWindow < rating._2) {
       ps.output(rating._2, userLosses.values.sum)
+      currentWindow = rating._2
       userLosses(rating._1.user) = getLoss(userVectors(rating._1.user), item, rating._1.rating)
     }
     else userLosses(rating._1.user) = getLoss(userVectors(rating._1.user), item, rating._1.rating)

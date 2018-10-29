@@ -47,6 +47,7 @@ object MF {
     val data = env.readTextFile(input_file_name)
     val formatter = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss")
     val lastFM = data.flatMap(new RichFlatMapFunction[String, (Rating, D)] {
+      private var x = 0
 
       override def flatMap(value: String, out: Collector[(Rating, D)]): Unit = {
         var distance = 0
@@ -59,8 +60,10 @@ object MF {
           case 0 => 0
           case 1 => 2
         }
-        val r = Rating(key, uid, iid, fieldsArray(3).toInt, formatter.parseDateTime(fieldsArray(0)), userPartition,
-          itemPartition)
+//        val timestamp = formatter.parseDateTime(fieldsArray(0)).getMillis
+        val timestamp = 1464882616000L + x
+        x += 1
+        val r = Rating(key, uid, iid, fieldsArray(3).toInt, timestamp, userPartition, itemPartition)
         if (r.userPartition != r.itemPartition) {
           distance = r.itemPartition - r.userPartition
           if (distance < 0) distance += MF.workerParallelism
@@ -68,12 +71,12 @@ object MF {
         out.collect((r, distance))
       }
     })
-      .assignAscendingTimestamps(_._1.timestamp.getMillis)
+      .assignAscendingTimestamps(_._1.timestamp)
       .keyBy(_._1.key)
-      .window(TumblingEventTimeWindows.of(Time.days(1)))
+      .window(TumblingEventTimeWindows.of(Time.milliseconds(20)))
       .apply(new SortSubstratums)
     PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate, userMemory,
-      negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime, MF.maxIId)
+      negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime, maxIId)
         .flatMap(new RichFlatMapFunction[Either[(W, Double), ((ItemId, Int), Vector)], (W, Double)] {
 
           override def flatMap(in: Either[(W, Double), ((ItemId, Int), Vector)], collector: Collector[(W, Double)]
@@ -86,7 +89,7 @@ object MF {
         })
         .keyBy(0)
         .sum(1)
-        .print()
+        .writeAsText("/media/xelabit/Elements1/Thesis/Data/out")
 //    val factorStream = PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate,
 //      userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime, MF.maxIId)
 //    lastFM

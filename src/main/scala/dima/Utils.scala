@@ -123,7 +123,6 @@ object Utils {
     if (l > 0) f = true
     if (x <= ps) p
     else {
-      ps -= 1
       ps += ps
       p += 1
       getHash(x, p, f, ps, l)
@@ -139,10 +138,10 @@ object Utils {
     * @return an id of a substratum along user or item axis.
     */
   def partitionId(id: Int, maxId: Int, n: Int): Int = {
-    val partitionSize = maxId / n
-    val leftover = maxId - partitionSize * n
-    val flag = leftover == 0
-    if (id < maxId) getHash(id, 0, flag, partitionSize, leftover)
+    val partitionSize = maxId / n //286
+    val leftover = maxId - partitionSize * n //1
+    val flag = leftover == 0 //false
+    if (id <= maxId) getHash(id, 0, flag, partitionSize, leftover)
     else -1
   }
 }

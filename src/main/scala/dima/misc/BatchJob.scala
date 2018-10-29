@@ -19,6 +19,7 @@
 package dima.misc
 
 import org.apache.flink.api.scala._
+import org.joda.time.format.DateTimeFormat
 
 /**
  * Skeleton for a Flink Batch Job.
@@ -33,34 +34,40 @@ import org.apache.flink.api.scala._
 object BatchJob {
 
   def main(args: Array[String]) {
-    // set up the batch execution environment
-    val env = ExecutionEnvironment.getExecutionEnvironment
+    def getHash(x: Int, partition: Int, flag: Boolean, partitionSize: Int, leftover: Int): Int = {
+      var f = flag
+      var p = partition
+      var ps = partitionSize
+      var l = leftover
+      if (f) {
+        ps += 1
+        l -= 1
+      }
+      if (l > 0) f = true
+      if (x <= ps) p
+      else {
+//        ps -= 1
+        ps += ps
+        p += 1
+        getHash(x, p, f, ps, l)
+      }
+    }
 
-    /*
-     * Here, you can start creating your execution plan for Flink.
-     *
-     * Start with getting some data from the environment, like
-     *  env.readTextFile(textPath);
-     *
-     * then, transform the resulting DataSet[String] using operations
-     * like
-     *   .filter()
-     *   .flatMap()
-     *   .join()
-     *   .group()
-     *
-     * and many more.
-     * Have a look at the programming guide:
-     *
-     * http://flink.apache.org/docs/latest/apis/batch/index.html
-     *
-     * and the examples
-     *
-     * http://flink.apache.org/docs/latest/apis/batch/examples.html
-     *
-     */
-
-    // execute program
-    env.execute("Flink Batch Scala API Skeleton")
+    /**
+      * Get the number of a block (substratum), to which a record should be assigned.
+      * @param id user/item id of a point.
+      * @param maxId largest user/item id. We assume we know this value in advance. However, this is not usually the
+      *              case in endless stream tasks.
+      * @param n a size of parallelism.
+      * @return an id of a substratum along user or item axis.
+      */
+    def partitionId(id: Int, maxId: Int, n: Int): Int = {
+      val partitionSize = maxId / n //286
+      val leftover = maxId - partitionSize * n //1
+      val flag = leftover == 0 //false
+      if (id <= maxId) getHash(id, 0, flag, partitionSize, leftover)
+      else -1
+    }
+    print(partitionId(572, 573, 2))
   }
 }
