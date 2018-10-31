@@ -33,7 +33,7 @@ class PSOnlineMatrixFactorizationWorker(numFactors: Int, rangeMin: Double, range
     item = vectorSum(item, itemDelta)
     if (currentWindow == 0L) currentWindow = rating._2
     else if (currentWindow < rating._2) {
-      ps.output(rating._2, userLosses.values.sum)
+      ps.output(currentWindow, userLosses.values.sum)
       currentWindow = rating._2
       userLosses(rating._1.user) = getLoss(userVectors(rating._1.user), item, rating._1.rating)
     }

@@ -47,7 +47,7 @@ object MF {
     val data = env.readTextFile(input_file_name)
     val formatter = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss")
     val lastFM = data.flatMap(new RichFlatMapFunction[String, (Rating, D)] {
-      private var x = 0
+//      private var x = 0
 
       override def flatMap(value: String, out: Collector[(Rating, D)]): Unit = {
         var distance = 0
@@ -60,10 +60,11 @@ object MF {
           case 0 => 0
           case 1 => 2
         }
+        val timestamp = fieldsArray(5).toLong
 //        val timestamp = formatter.parseDateTime(fieldsArray(0)).getMillis
-        val timestamp = 1464882616000L + x
-        x += 1
-        val r = Rating(key, uid, iid, fieldsArray(3).toInt, timestamp, userPartition, itemPartition)
+//        val timestamp = 1464882616000L + x
+//        x += 1
+        val r = Rating(key, uid, iid, fieldsArray(4).toInt, timestamp, userPartition, itemPartition)
         if (r.userPartition != r.itemPartition) {
           distance = r.itemPartition - r.userPartition
           if (distance < 0) distance += MF.workerParallelism
@@ -73,7 +74,7 @@ object MF {
     })
       .assignAscendingTimestamps(_._1.timestamp)
       .keyBy(_._1.key)
-      .window(TumblingEventTimeWindows.of(Time.milliseconds(20)))
+      .window(TumblingEventTimeWindows.of(Time.minutes(20)))
       .apply(new SortSubstratums)
     PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate, userMemory,
       negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime, maxIId)
@@ -89,7 +90,7 @@ object MF {
         })
         .keyBy(0)
         .sum(1)
-        .writeAsText("/media/xelabit/Elements1/Thesis/Data/out")
+        .writeAsText("~/Documents/de/out")
 //    val factorStream = PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate,
 //      userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime, MF.maxIId)
 //    lastFM
