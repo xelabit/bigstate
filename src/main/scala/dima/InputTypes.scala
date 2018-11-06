@@ -19,5 +19,5 @@ object InputTypes {
     * @param itemPartition an id used to define, to which stratum (along item axis) this rating belongs.
     */
   case class Rating(key: Int, user: UserId, item: ItemId, rating: Int, timestamp: Long, userPartition: Int,
-                    itemPartition: Int)
+                    itemPartition: Int, label: String)
 }

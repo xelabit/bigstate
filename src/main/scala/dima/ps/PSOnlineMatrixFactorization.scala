@@ -17,11 +17,11 @@ object PSOnlineMatrixFactorization {
                  rangeMax: Double = 0.01, learningRate: Double, userMemory: Int,
                  negativeSampleRate: Int, pullLimit: Int = 1600, workerParallelism: Int, psParallelism: Int,
                  iterationWaitTime: Long = 10000, maxItemId: Int
-                ): DataStream[Either[(W, Double), ((ItemId, Int), Vector)]] = {
+                ): DataStream[Either[(String, W, Double), ((ItemId, Int), Vector)]] = {
     val factorInitDesc = RangedRandomFactorInitializerDescriptor(numFactors, rangeMin, rangeMax)
     val workerLogicBase = new PSOnlineMatrixFactorizationWorker(numFactors, rangeMin, rangeMax, learningRate,
       userMemory, negativeSampleRate, maxItemId, psParallelism)
-    val workerLogic: WorkerLogic[(Rating, W), (ItemId, Int), Vector, (W, Double)] =
+    val workerLogic: WorkerLogic[(Rating, W), (ItemId, Int), Vector, (String, W, Double)] =
       WorkerLogic.addPullLimiter(workerLogicBase, pullLimit)
     val serverLogic = new SimplePSLogic[(ItemId, Int), Array[Double]](x => factorInitDesc.open().nextFactor(x._1),
       (vec, deltaVec) => vectorSum(vec, deltaVec))

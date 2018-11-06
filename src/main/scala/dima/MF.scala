@@ -60,11 +60,11 @@ object MF {
           case 0 => 0
           case 1 => 2
         }
-        val timestamp = fieldsArray(5).toLong
+        val timestamp = fieldsArray(6).toLong
 //        val timestamp = formatter.parseDateTime(fieldsArray(0)).getMillis
 //        val timestamp = 1464882616000L + x
 //        x += 1
-        val r = Rating(key, uid, iid, fieldsArray(4).toInt, timestamp, userPartition, itemPartition)
+        val r = Rating(key, uid, iid, fieldsArray(5).toInt, timestamp, userPartition, itemPartition, fieldsArray(3))
         if (r.userPartition != r.itemPartition) {
           distance = r.itemPartition - r.userPartition
           if (distance < 0) distance += MF.workerParallelism
@@ -78,18 +78,18 @@ object MF {
       .apply(new SortSubstratums)
     PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate, userMemory,
       negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime, maxIId)
-        .flatMap(new RichFlatMapFunction[Either[(W, Double), ((ItemId, Int), Vector)], (W, Double)] {
+        .flatMap(new RichFlatMapFunction[Either[(String, W, Double), ((ItemId, Int), Vector)], (String, W, Double)] {
 
-          override def flatMap(in: Either[(W, Double), ((ItemId, Int), Vector)], collector: Collector[(W, Double)]
-                              ): Unit = {
+          override def flatMap(in: Either[(String, W, Double), ((ItemId, Int), Vector)],
+                               collector: Collector[(String, W, Double)]): Unit = {
             in match {
-              case Left((window, loss)) => collector.collect((window, loss))
+              case Left((label, window, loss)) => collector.collect((label, window, loss))
               case _ => None
             }
           }
         })
-        .keyBy(0)
-        .sum(1)
+        .keyBy(1)
+        .sum(2)
         .writeAsText("~/Documents/de/out")
 //    val factorStream = PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate,
 //      userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime, MF.maxIId)
