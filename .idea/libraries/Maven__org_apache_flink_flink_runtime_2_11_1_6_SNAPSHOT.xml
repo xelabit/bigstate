@@ -1,13 +1,13 @@
 <component name="libraryTable">
   <library name="Maven: org.apache.flink:flink-runtime_2.11:1.6-SNAPSHOT">
     <CLASSES>
-      <root url="jar://$MAVEN_REPOSITORY$/org/apache/flink/flink-runtime_2.11/1.6-SNAPSHOT/flink-runtime_2.11-1.6-20181024.014418-200.jar!/" />
+      <root url="jar://$MAVEN_REPOSITORY$/org/apache/flink/flink-runtime_2.11/1.6-SNAPSHOT/flink-runtime_2.11-1.6-20181111.014121-217.jar!/" />
     </CLASSES>
     <JAVADOC>
-      <root url="jar://$MAVEN_REPOSITORY$/org/apache/flink/flink-runtime_2.11/1.6-SNAPSHOT/flink-runtime_2.11-1.6-20181024.014418-200-javadoc.jar!/" />
+      <root url="jar://$MAVEN_REPOSITORY$/org/apache/flink/flink-runtime_2.11/1.6-SNAPSHOT/flink-runtime_2.11-1.6-20181111.014121-217-javadoc.jar!/" />
     </JAVADOC>
     <SOURCES>
-      <root url="jar://$MAVEN_REPOSITORY$/org/apache/flink/flink-runtime_2.11/1.6-SNAPSHOT/flink-runtime_2.11-1.6-20181024.014418-200-sources.jar!/" />
+      <root url="jar://$MAVEN_REPOSITORY$/org/apache/flink/flink-runtime_2.11/1.6-SNAPSHOT/flink-runtime_2.11-1.6-20181111.014121-217-sources.jar!/" />
     </SOURCES>
   </library>
 </component>

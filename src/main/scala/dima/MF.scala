@@ -1,24 +1,21 @@
 package dima
 
+import java.util.Properties
+
 import dima.Utils._
 import dima.InputTypes.Rating
 import dima.ps.PSOnlineMatrixFactorization
 import dima.ps.Vector._
 import org.apache.flink.api.common.functions.RichFlatMapFunction
-import org.apache.flink.api.common.state._
-import org.apache.flink.configuration.Configuration
+import org.apache.flink.api.common.serialization.SimpleStringSchema
 import org.apache.flink.streaming.api.TimeCharacteristic
-import org.apache.flink.streaming.api.functions.co.RichCoFlatMapFunction
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.scala.function.RichWindowFunction
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow
+import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer08
 import org.apache.flink.util.Collector
-import org.joda.time.format.DateTimeFormat
-
-import scala.collection.JavaConversions._
-import scala.collection.mutable
 
 class MF {
 
@@ -44,8 +41,17 @@ object MF {
     env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
     env.setParallelism(2)
     env.setMaxParallelism(2)
+
+    // Kafka connector
+    val properties = new Properties()
+    properties.setProperty("bootstrap.servers", "localhost:9092")
+    properties.setProperty("zookeeper.connect", "localhost:2181")
+    properties.setProperty("group.id", "test")
+    val stream = env
+      .addSource(new FlinkKafkaConsumer08[String]("topic", new SimpleStringSchema(), properties))
+      .print()
     val data = env.readTextFile(input_file_name)
-    val formatter = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss")
+//    val formatter = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss")
     val lastFM = data.flatMap(new RichFlatMapFunction[String, (Rating, D)] {
 //      private var x = 0
 

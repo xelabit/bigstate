@@ -74,6 +74,16 @@
     <orderEntry type="library" name="Maven: org.typelevel:machinist_2.11:0.6.1" level="project" />
     <orderEntry type="library" name="Maven: com.chuusai:shapeless_2.11:2.3.2" level="project" />
     <orderEntry type="library" name="Maven: org.typelevel:macro-compat_2.11:1.1.1" level="project" />
+    <orderEntry type="library" name="Maven: org.apache.flink:flink-connector-kafka-0.8_2.11:1.6-SNAPSHOT" level="project" />
+    <orderEntry type="library" name="Maven: org.apache.flink:flink-connector-kafka-base_2.11:1.6-SNAPSHOT" level="project" />
+    <orderEntry type="library" name="Maven: org.apache.kafka:kafka_2.11:0.8.2.2" level="project" />
+    <orderEntry type="library" name="Maven: com.yammer.metrics:metrics-core:2.2.0" level="project" />
+    <orderEntry type="library" name="Maven: com.101tec:zkclient:0.3" level="project" />
+    <orderEntry type="library" name="Maven: org.apache.kafka:kafka-clients:0.8.2.2" level="project" />
+    <orderEntry type="library" name="Maven: net.jpountz.lz4:lz4:1.2.0" level="project" />
+    <orderEntry type="library" name="Maven: org.apache.zookeeper:zookeeper:3.4.6" level="project" />
+    <orderEntry type="library" name="Maven: jline:jline:0.9.94" level="project" />
+    <orderEntry type="library" name="Maven: io.netty:netty:3.7.0.Final" level="project" />
     <orderEntry type="library" scope="RUNTIME" name="Maven: org.slf4j:slf4j-log4j12:1.7.7" level="project" />
     <orderEntry type="library" scope="RUNTIME" name="Maven: log4j:log4j:1.2.17" level="project" />
   </component>

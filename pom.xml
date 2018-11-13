@@ -94,6 +94,11 @@ under the License.
 			<artifactId>breeze_2.11</artifactId> <!-- or 2.11 -->
 			<version>0.13.2</version>
 		</dependency>
+		<dependency>
+			<groupId>org.apache.flink</groupId>
+			<artifactId>flink-connector-kafka-0.8_${scala.binary.version}</artifactId>
+			<version>${flink.version}</version>
+		</dependency>
 
 		<!-- Add logging framework, to produce console output when running in the IDE. -->
 		<!-- These dependencies are excluded from the application JAR by default. -->
