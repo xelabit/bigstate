@@ -14,7 +14,7 @@ import org.apache.flink.streaming.api.scala.function.RichWindowFunction
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow
-import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer08
+import org.apache.flink.streaming.connectors.kafka.{FlinkKafkaConsumer011, FlinkKafkaProducer011}
 import org.apache.flink.util.Collector
 
 class MF {
@@ -42,17 +42,17 @@ object MF {
     env.setParallelism(2)
     env.setMaxParallelism(2)
 
-    // Kafka connector
+    // Kafka consumer
     val properties = new Properties()
     properties.setProperty("bootstrap.servers", "localhost:9092")
-    properties.setProperty("zookeeper.connect", "localhost:2181")
-    properties.setProperty("group.id", "test")
-    val stream = env
-      .addSource(new FlinkKafkaConsumer08[String]("topic", new SimpleStringSchema(), properties))
-      .print()
-    val data = env.readTextFile(input_file_name)
-//    val formatter = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss")
-    val lastFM = data.flatMap(new RichFlatMapFunction[String, (Rating, D)] {
+//    properties.setProperty("zookeeper.connect", "localhost:2181")
+    properties.setProperty("group.id", "test-consumer-group")
+    val myConsumer = new FlinkKafkaConsumer011[String]("records", new SimpleStringSchema(), properties)
+    myConsumer.setStartFromEarliest()
+    val stream = env.addSource(myConsumer)
+//    val data = env.readTextFile(input_file_name)
+//    val formatter = DateTimeForm0at.forPattern("yyyy-MM-dd HH:mm:ss")
+    val lastFM = stream.flatMap(new RichFlatMapFunction[String, (Rating, D)] {
 //      private var x = 0
 
       override def flatMap(value: String, out: Collector[(Rating, D)]): Unit = {
@@ -80,10 +80,10 @@ object MF {
     })
       .assignAscendingTimestamps(_._1.timestamp)
       .keyBy(_._1.key)
-      .window(TumblingEventTimeWindows.of(Time.minutes(20)))
+      .window(TumblingEventTimeWindows.of(Time.seconds(20)))
       .apply(new SortSubstratums)
-    PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate, userMemory,
-      negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime, maxIId)
+    val losses = PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate,
+      userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime, maxIId)
         .flatMap(new RichFlatMapFunction[Either[(String, W, Double), ((ItemId, Int), Vector)], (String, W, Double)] {
 
           override def flatMap(in: Either[(String, W, Double), ((ItemId, Int), Vector)],
@@ -96,7 +96,13 @@ object MF {
         })
         .keyBy(1)
         .sum(2)
-        .writeAsText("~/Documents/de/out")
+        .map(x => x.toString)
+//        .writeAsText("~/Documents/de/out")
+
+    // Kafka Producer
+    val myProducer = new FlinkKafkaProducer011[String]("localhost:9092","losses",
+      new SimpleStringSchema)
+    losses.addSink(myProducer)
 //    val factorStream = PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate,
 //      userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime, MF.maxIId)
 //    lastFM

@@ -3,9 +3,9 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>dima</groupId>
   <artifactId>bigstate</artifactId>
-  <name>Flink Quickstart Job</name>
+  <name>Big State Job</name>
   <version>0.1</version>
-  <url>http://www.myorganization.org</url>
+  <url>https://github.com/xelabit/bigstate</url>
   <build>
     <plugins>
       <plugin>
@@ -188,10 +188,6 @@
           <artifactId>jsr305</artifactId>
           <groupId>com.google.code.findbugs</groupId>
         </exclusion>
-        <exclusion>
-          <artifactId>force-shading</artifactId>
-          <groupId>org.apache.flink</groupId>
-        </exclusion>
       </exclusions>
     </dependency>
     <dependency>
@@ -211,10 +207,6 @@
         <exclusion>
           <artifactId>jsr305</artifactId>
           <groupId>com.google.code.findbugs</groupId>
-        </exclusion>
-        <exclusion>
-          <artifactId>force-shading</artifactId>
-          <groupId>org.apache.flink</groupId>
         </exclusion>
       </exclusions>
     </dependency>
