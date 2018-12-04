@@ -11,11 +11,13 @@ import org.apache.flink.api.common.serialization.SimpleStringSchema
 import org.apache.flink.streaming.api.TimeCharacteristic
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.scala.function.RichWindowFunction
+import org.apache.flink.streaming.api.functions.timestamps.BoundedOutOfOrdernessTimestampExtractor
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow
 import org.apache.flink.streaming.connectors.kafka.{FlinkKafkaConsumer011, FlinkKafkaProducer011}
 import org.apache.flink.util.Collector
+import org.slf4j.LoggerFactory
 
 class MF {
 
@@ -27,27 +29,28 @@ object MF {
   val rangeMax = 0.1
   val userMemory = 128
   val negativeSampleRate = 9
-  val maxUId = 573
-  val maxIId = 875
+  val maxUId = 291485
+  val maxIId = 2158859
   val workerParallelism = 2
   val psParallelism = 2
   val learningRate = 0.01
   val pullLimit = 1500
   val iterationWaitTime = 10000
+  private val log = LoggerFactory.getLogger(classOf[MF])
 
   def main(args: Array[String]): Unit = {
     val input_file_name = args(0)
     val env: StreamExecutionEnvironment = StreamExecutionEnvironment.getExecutionEnvironment
     env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
     env.setParallelism(2)
-    env.setMaxParallelism(2)
+    env.setMaxParallelism(4096)
 
     // Kafka consumer
     val properties = new Properties()
-    properties.setProperty("bootstrap.servers", "localhost:9092")
+    properties.setProperty("bootstrap.servers", "ibm-power-2.dima.tu-berlin.de:9092,ibm-power-7.dima.tu-berlin.de:9092")
 //    properties.setProperty("zookeeper.connect", "localhost:2181")
     properties.setProperty("group.id", "test-consumer-group")
-    val myConsumer = new FlinkKafkaConsumer011[String]("records", new SimpleStringSchema(), properties)
+    val myConsumer = new FlinkKafkaConsumer011[String]("reocrds2", new SimpleStringSchema(), properties)
     myConsumer.setStartFromEarliest()
     val stream = env.addSource(myConsumer)
 //    val data = env.readTextFile(input_file_name)
@@ -63,8 +66,8 @@ object MF {
         val userPartition = partitionId(uid, maxUId, workerParallelism)
         val itemPartition = partitionId(iid, maxIId, workerParallelism)
         val key = userPartition match {
-          case 0 => 0
-          case 1 => 2
+          case 0 => 4
+          case 1 => 0
         }
         val timestamp = fieldsArray(6).toLong
 //        val timestamp = formatter.parseDateTime(fieldsArray(0)).getMillis
@@ -78,9 +81,12 @@ object MF {
         out.collect((r, distance))
       }
     })
-      .assignAscendingTimestamps(_._1.timestamp)
+      //.assignAscendingTimestamps(_._1.timestamp)
+      .assignTimestampsAndWatermarks(new BoundedOutOfOrdernessTimestampExtractor[(Rating, D)](Time.seconds(10)) {
+        override def extractTimestamp(event: (Rating, D)): Long = event._1.timestamp
+      })
       .keyBy(_._1.key)
-      .window(TumblingEventTimeWindows.of(Time.seconds(20)))
+      .window(TumblingEventTimeWindows.of(Time.seconds(30)))
       .apply(new SortSubstratums)
     val losses = PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate,
       userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime, maxIId)
@@ -100,7 +106,7 @@ object MF {
 //        .writeAsText("~/Documents/de/out")
 
     // Kafka Producer
-    val myProducer = new FlinkKafkaProducer011[String]("localhost:9092","losses",
+    val myProducer = new FlinkKafkaProducer011[String]("ibm-power-2.dima.tu-berlin.de:9092,ibm-power-7.dima.tu-berlin.de:9092","losses",
       new SimpleStringSchema)
     losses.addSink(myProducer)
 //    val factorStream = PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate,
