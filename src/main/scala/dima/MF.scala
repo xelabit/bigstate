@@ -41,18 +41,18 @@ object MF {
   def main(args: Array[String]): Unit = {
     val input_file_name = args(0)
     val env: StreamExecutionEnvironment = StreamExecutionEnvironment.getExecutionEnvironment
-    env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
+    env.setStreamTimeCharacteristic(TimeCharacteristic.ProcessingTime)
     env.setParallelism(2)
     env.setMaxParallelism(4096)
 
     // Kafka consumer
     val properties = new Properties()
-    properties.setProperty("bootstrap.servers", "ibm-power-2.dima.tu-berlin.de:9092,ibm-power-7.dima.tu-berlin.de:9092")
+    properties.setProperty("bootstrap.servers", "ibm-power-2.dima.tu-berlin.de:9092,ibm-power-3.dima.tu-berlin.de:9092")
 //    properties.setProperty("zookeeper.connect", "localhost:2181")
     properties.setProperty("group.id", "test-consumer-group")
-    val myConsumer = new FlinkKafkaConsumer011[String]("reocrds2", new SimpleStringSchema(), properties)
+    val myConsumer = new FlinkKafkaConsumer011[String]("test", new SimpleStringSchema(), properties)
     myConsumer.setStartFromEarliest()
-    val stream = env.addSource(myConsumer)
+    val stream = env.addSource(myConsumer).setParallelism(1)
 //    val data = env.readTextFile(input_file_name)
 //    val formatter = DateTimeForm0at.forPattern("yyyy-MM-dd HH:mm:ss")
     val lastFM = stream.flatMap(new RichFlatMapFunction[String, (Rating, D)] {
@@ -83,10 +83,11 @@ object MF {
     })
       //.assignAscendingTimestamps(_._1.timestamp)
       .assignTimestampsAndWatermarks(new BoundedOutOfOrdernessTimestampExtractor[(Rating, D)](Time.seconds(10)) {
+
         override def extractTimestamp(event: (Rating, D)): Long = event._1.timestamp
       })
       .keyBy(_._1.key)
-      .window(TumblingEventTimeWindows.of(Time.seconds(30)))
+      .window(TumblingProcessingTimeWindows.of(Time.seconds(30)))
       .apply(new SortSubstratums)
     val losses = PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate,
       userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime, maxIId)
@@ -106,7 +107,7 @@ object MF {
 //        .writeAsText("~/Documents/de/out")
 
     // Kafka Producer
-    val myProducer = new FlinkKafkaProducer011[String]("ibm-power-2.dima.tu-berlin.de:9092,ibm-power-7.dima.tu-berlin.de:9092","losses",
+    val myProducer = new FlinkKafkaProducer011[String]("ibm-power-2.dima.tu-berlin.de:9092,ibm-power-3.dima.tu-berlin.de:9092","losses",
       new SimpleStringSchema)
     losses.addSink(myProducer)
 //    val factorStream = PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate,
