@@ -110,11 +110,13 @@ object Utils {
     }
     loss
   }
+  
+  private var partitionSize: Int = 0
 
-  def getHash(x: Int, partition: Int, flag: Boolean, partitionSize: Int, leftover: Int): Int = {
+  def getHash(x: Int, partition: Int, flag: Boolean, partitionSizeCumulative: Int, leftover: Int): Int = {
     var f = flag
     var p = partition
-    var ps = partitionSize
+    var ps = partitionSizeCumulative
     var l = leftover
     if (f) {
       ps += 1
@@ -123,7 +125,7 @@ object Utils {
     if (l > 0) f = true
     if (x <= ps) p
     else {
-      ps += ps
+      ps += partitionSize
       p += 1
       getHash(x, p, f, ps, l)
     }
@@ -138,7 +140,7 @@ object Utils {
     * @return an id of a substratum along user or item axis.
     */
   def partitionId(id: Int, maxId: Int, n: Int): Int = {
-    val partitionSize = maxId / n
+    partitionSize = maxId / n
     val leftover = maxId - partitionSize * n
     val flag = leftover == 0
     if (id <= maxId) getHash(id, 0, flag, partitionSize, leftover)

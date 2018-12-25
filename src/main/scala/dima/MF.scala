@@ -6,11 +6,14 @@ import dima.Utils._
 import dima.InputTypes.Rating
 import dima.ps.PSOnlineMatrixFactorization
 import dima.ps.Vector._
+
 import org.apache.flink.api.common.functions.RichFlatMapFunction
 import org.apache.flink.api.common.serialization.SimpleStringSchema
 import org.apache.flink.streaming.api.TimeCharacteristic
+import org.apache.flink.streaming.api.watermark.Watermark
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.scala.function.RichWindowFunction
+import org.apache.flink.streaming.api.functions.AssignerWithPeriodicWatermarks
 import org.apache.flink.streaming.api.functions.timestamps.BoundedOutOfOrdernessTimestampExtractor
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows
 import org.apache.flink.streaming.api.windowing.time.Time
@@ -18,6 +21,8 @@ import org.apache.flink.streaming.api.windowing.windows.TimeWindow
 import org.apache.flink.streaming.connectors.kafka.{FlinkKafkaConsumer011, FlinkKafkaProducer011}
 import org.apache.flink.util.Collector
 import org.slf4j.LoggerFactory
+
+import scala.math.max
 
 class MF {
 
@@ -29,10 +34,10 @@ object MF {
   val rangeMax = 0.1
   val userMemory = 128
   val negativeSampleRate = 9
-  val maxUId = 291485
-  val maxIId = 2158859
-  val workerParallelism = 2
-  val psParallelism = 2
+  val maxUId = 521684
+  val maxIId = 2299712
+  val workerParallelism = 12
+  val psParallelism = 12
   val learningRate = 0.01
   val pullLimit = 1500
   val iterationWaitTime = 10000
@@ -41,18 +46,18 @@ object MF {
   def main(args: Array[String]): Unit = {
     val input_file_name = args(0)
     val env: StreamExecutionEnvironment = StreamExecutionEnvironment.getExecutionEnvironment
-    env.setStreamTimeCharacteristic(TimeCharacteristic.ProcessingTime)
-    env.setParallelism(2)
+    env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
+    env.setParallelism(12)
     env.setMaxParallelism(4096)
 
     // Kafka consumer
     val properties = new Properties()
-    properties.setProperty("bootstrap.servers", "ibm-power-2.dima.tu-berlin.de:9092,ibm-power-3.dima.tu-berlin.de:9092")
+    properties.setProperty("bootstrap.servers", "ibm-power-3.dima.tu-berlin.de:9092")
 //    properties.setProperty("zookeeper.connect", "localhost:2181")
     properties.setProperty("group.id", "test-consumer-group")
-    val myConsumer = new FlinkKafkaConsumer011[String]("test", new SimpleStringSchema(), properties)
+    val myConsumer = new FlinkKafkaConsumer011[String]("ratings", new SimpleStringSchema(), properties)
     myConsumer.setStartFromEarliest()
-    val stream = env.addSource(myConsumer).setParallelism(1)
+    val stream = env.addSource(myConsumer).setParallelism(2)
 //    val data = env.readTextFile(input_file_name)
 //    val formatter = DateTimeForm0at.forPattern("yyyy-MM-dd HH:mm:ss")
     val lastFM = stream.flatMap(new RichFlatMapFunction[String, (Rating, D)] {
@@ -65,9 +70,21 @@ object MF {
         val iid = fieldsArray(2).toInt
         val userPartition = partitionId(uid, maxUId, workerParallelism)
         val itemPartition = partitionId(iid, maxIId, workerParallelism)
+        if (userPartition == -1) println(s"uid $uid")
+        if (itemPartition == -1) println(s"iid $iid")
         val key = userPartition match {
           case 0 => 4
-          case 1 => 0
+          case 1 => 10
+          case 2 => 22
+          case 3 => 12
+          case 4 => 26
+          case 5 => 11
+          case 6 => 9
+          case 7 => 0
+          case 8 => 2
+          case 9 => 6
+          case 10 => 42
+          case 11 => 1
         }
         val timestamp = fieldsArray(6).toLong
 //        val timestamp = formatter.parseDateTime(fieldsArray(0)).getMillis
@@ -82,12 +99,13 @@ object MF {
       }
     })
       //.assignAscendingTimestamps(_._1.timestamp)
-      .assignTimestampsAndWatermarks(new BoundedOutOfOrdernessTimestampExtractor[(Rating, D)](Time.seconds(10)) {
+     // .assignTimestampsAndWatermarks(new BoundedOutOfOrdernessTimestampExtractor[(Rating, D)](Time.seconds(10)) {
 
-        override def extractTimestamp(event: (Rating, D)): Long = event._1.timestamp
-      })
+       // override def extractTimestamp(event: (Rating, D)): Long = event._1.timestamp
+     // })
+      .assignTimestampsAndWatermarks(new BoundedOutOfOrdernessGenerator) 
       .keyBy(_._1.key)
-      .window(TumblingProcessingTimeWindows.of(Time.seconds(30)))
+      .window(TumblingEventTimeWindows.of(Time.hours(3)))
       .apply(new SortSubstratums)
     val losses = PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate,
       userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime, maxIId)
@@ -107,9 +125,11 @@ object MF {
 //        .writeAsText("~/Documents/de/out")
 
     // Kafka Producer
-    val myProducer = new FlinkKafkaProducer011[String]("ibm-power-2.dima.tu-berlin.de:9092,ibm-power-3.dima.tu-berlin.de:9092","losses",
-      new SimpleStringSchema)
-    losses.addSink(myProducer)
+    val producerProperties = new Properties()
+    producerProperties.setProperty("bootstrap.servers", "ibm-power-3.dima.tu-berlin.de:9092")
+    producerProperties.setProperty("request.timeout.ms", "300000") //default 30
+    val myProducer = new FlinkKafkaProducer011[String]("lossesibm3", new SimpleStringSchema, producerProperties)
+    losses.addSink(myProducer).setParallelism(2)
 //    val factorStream = PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate,
 //      userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime, MF.maxIId)
 //    lastFM
@@ -182,4 +202,19 @@ class SortSubstratums extends RichWindowFunction[(Rating, D), (Rating, W), Int, 
 
   override def apply(key: Int, window: TimeWindow, input: Iterable[(Rating, D)], out: Collector[(Rating, W)]): Unit =
     input.toList.sortWith(_._2 < _._2).map(x => out.collect(x._1, window.getStart))
+}
+
+class BoundedOutOfOrdernessGenerator extends AssignerWithPeriodicWatermarks[(Rating, D)] {
+  val maxOutOfOrderness = 3500L
+  var currentMaxTimestamp: Long = _
+
+  override def extractTimestamp(element: (Rating, D), previousElementTimestamp: Long): Long = {
+    val timestamp = element._1.timestamp
+    currentMaxTimestamp = max(timestamp, currentMaxTimestamp)
+    timestamp
+  }
+
+  override def getCurrentWatermark(): Watermark = {
+    new Watermark(currentMaxTimestamp - maxOutOfOrderness)
+  }
 }

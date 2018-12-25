@@ -10,7 +10,7 @@ object KeyPartition {
   def main(args: Array[String]): Unit = {
     val streamingEnv = StreamExecutionEnvironment.getExecutionEnvironment
     var executionConfig = streamingEnv.getConfig
-    val p = 2
+    val p = 12 
     val maxP = 4096
     executionConfig.setParallelism(p)
     executionConfig.setMaxParallelism(maxP)

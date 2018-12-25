@@ -119,7 +119,7 @@ object FlinkParameterServer {
           val ps = new MessagingPS[PStoWorker, WorkerToPS, Id, P, PSOut](sender)
 
           override def flatMap(msg: WorkerToPS, out: Collector[Either[PStoWorker, PSOut]]): Unit = {
-            log.debug(s"Pull request or push msg @ PS: $msg")
+//            log.debug(s"Pull request or push msg @ PS: $msg")
             ps.setCollector(out)
             receiver.onWorkerMsg(msg,
               (pullId, workerPartitionIndex) => logic.onPullRecv(pullId, workerPartitionIndex, ps),
