@@ -79,7 +79,7 @@ object FlinkParameterServer {
 
             // incoming answer from PS
             override def flatMap2(msg: PStoWorker, out: Collector[Either[WorkerToPS, WOut]]): Unit = {
-              log.debug(s"Pull answer: $msg")
+//              log.debug(s"Pull answer: $msg")
               psClient.setCollector(out)
               receiver.onPullAnswerRecv(msg, {
                 case PullAnswer(id, value) => logic.onPullRecv(id, value, psClient)
@@ -88,7 +88,7 @@ object FlinkParameterServer {
 
             // incoming data
             override def flatMap1(data: T, out: Collector[Either[WorkerToPS, WOut]]): Unit = {
-              log.debug(s"Incoming data: $data")
+//              log.debug(s"Incoming data: $data")
               psClient.setCollector(out)
               logic.onRecv(data, psClient)
             }

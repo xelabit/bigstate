@@ -29,16 +29,16 @@ class MF {
 }
 
 object MF {
-  val numFactors = 10
+  val numFactors = 25
   val rangeMin: Double = -0.1
   val rangeMax = 0.1
   val userMemory = 128
   val negativeSampleRate = 9
   val maxUId = 521684
   val maxIId = 2299712
-  val workerParallelism = 12
-  val psParallelism = 12
-  val learningRate = 0.01
+  val workerParallelism = 18
+  val psParallelism = 18
+  val learningRate = 0.03
   val pullLimit = 1500
   val iterationWaitTime = 10000
   private val log = LoggerFactory.getLogger(classOf[MF])
@@ -47,7 +47,7 @@ object MF {
     val input_file_name = args(0)
     val env: StreamExecutionEnvironment = StreamExecutionEnvironment.getExecutionEnvironment
     env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
-    env.setParallelism(12)
+    env.setParallelism(18)
     env.setMaxParallelism(4096)
 
     // Kafka consumer
@@ -73,24 +73,30 @@ object MF {
         if (userPartition == -1) println(s"uid $uid")
         if (itemPartition == -1) println(s"iid $iid")
         val key = userPartition match {
-          case 0 => 4
-          case 1 => 10
-          case 2 => 22
-          case 3 => 12
-          case 4 => 26
-          case 5 => 11
-          case 6 => 9
-          case 7 => 0
-          case 8 => 2
-          case 9 => 6
-          case 10 => 42
-          case 11 => 1
+          case 0 => 55
+          case 1 => 4
+          case 2 => 10
+          case 3 => 60
+          case 4 => 12
+          case 5 => 35
+          case 6 => 26
+          case 7 => 15
+          case 8 => 11
+          case 9 => 9
+          case 10 => 3
+          case 11 => 0
+          case 12 => 2
+          case 13 => 17
+          case 14 => 6
+          case 15 => 42
+          case 16 => 49
+          case 17 => 1
         }
         val timestamp = fieldsArray(6).toLong
 //        val timestamp = formatter.parseDateTime(fieldsArray(0)).getMillis
 //        val timestamp = 1464882616000L + x
 //        x += 1
-        val r = Rating(key, uid, iid, fieldsArray(5).toInt, timestamp, userPartition, itemPartition, fieldsArray(3))
+        val r = Rating(key, uid, iid, fieldsArray(4).toInt, timestamp, userPartition, itemPartition, fieldsArray(3))
         if (r.userPartition != r.itemPartition) {
           distance = r.itemPartition - r.userPartition
           if (distance < 0) distance += MF.workerParallelism
@@ -105,7 +111,7 @@ object MF {
      // })
       .assignTimestampsAndWatermarks(new BoundedOutOfOrdernessGenerator) 
       .keyBy(_._1.key)
-      .window(TumblingEventTimeWindows.of(Time.hours(3)))
+      .window(TumblingEventTimeWindows.of(Time.hours(12)))
       .apply(new SortSubstratums)
     val losses = PSOnlineMatrixFactorization.psOnlineMF(lastFM, numFactors, rangeMin, rangeMax, learningRate,
       userMemory, negativeSampleRate, pullLimit, workerParallelism, psParallelism, iterationWaitTime, maxIId)
