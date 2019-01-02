@@ -21,8 +21,10 @@ class PSOnlineMatrixFactorizationWorker(numFactors: Int, rangeMin: Double, range
   val ratingBuffer = new mutable.HashMap[ItemId, mutable.Queue[(Rating, W)]]()
   val seenItemsSet = new mutable.HashMap[UserId, mutable.HashSet[ItemId]]
   val userVectors = new mutable.HashMap[UserId, Vector]
-  val userLosses = new mutable.HashMap[UserId, Double]
-  val userTestLosses = new mutable.HashMap[UserId, Double]
+//  val losses = new mutable.HashMap[(UserId, ItemId), Double]
+//  val testLosses = new mutable.HashMap[(UserId, ItemId), Double]
+  var trainLoss = 0.0
+  var testLoss = 0.0
   val itemIds = new mutable.ArrayBuffer[ItemId]
 
   def onPullRecv(paramId: (ItemId, Int), paramValue: Vector,
@@ -37,21 +39,27 @@ class PSOnlineMatrixFactorizationWorker(numFactors: Int, rangeMin: Double, range
         item = vectorSum(item, itemDelta)
         if (currentWindow == 0L) currentWindow = rating._2
         else if (currentWindow < rating._2) {
-          ps.output("train", currentWindow, userLosses.values.sum)
+//          ps.output("train", currentWindow, losses.values.sum)
+          ps.output("train", currentWindow, trainLoss)
           currentWindow = rating._2
-          userLosses(rating._1.user) = getLoss(userVectors(rating._1.user), item, rating._1.rating)
+//          losses((rating._1.user, rating._1.item)) = getLoss(userVectors(rating._1.user), item, rating._1.rating)
+          trainLoss += getLoss(userVectors(rating._1.user), item, rating._1.rating)
         }
-        else userLosses(rating._1.user) = getLoss(userVectors(rating._1.user), item, rating._1.rating)
+//        else losses((rating._1.user, rating._1.item)) = getLoss(userVectors(rating._1.user), item, rating._1.rating)
+        else trainLoss += getLoss(userVectors(rating._1.user), item, rating._1.rating)
         ps.push(paramId, itemDelta)
       }
       case "test" => {
         if (currentTestWindow == 0L) currentTestWindow = rating._2
         else if (currentTestWindow < rating._2) {
-          ps.output("test", currentTestWindow, userTestLosses.values.sum)
+//          ps.output("test", currentTestWindow, testLosses.values.sum)
+          ps.output("test", currentTestWindow, testLoss)
           currentTestWindow = rating._2
-          userTestLosses(rating._1.user) = getLoss(userVectors(rating._1.user), item, rating._1.rating)
+//          testLosses((rating._1.user, rating._1.item)) = getLoss(userVectors(rating._1.user), item, rating._1.rating)
+          testLoss += getLoss(userVectors(rating._1.user), item, rating._1.rating)
         }
-        else userTestLosses(rating._1.user) = getLoss(userVectors(rating._1.user), item, rating._1.rating)
+//        else testLosses((rating._1.user, rating._1.item)) = getLoss(userVectors(rating._1.user), item, rating._1.rating)
+        else testLoss += getLoss(userVectors(rating._1.user), item, rating._1.rating)
       }
     }
   }
