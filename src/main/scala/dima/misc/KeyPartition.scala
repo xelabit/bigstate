@@ -10,12 +10,12 @@ object KeyPartition {
   def main(args: Array[String]): Unit = {
     val streamingEnv = StreamExecutionEnvironment.getExecutionEnvironment
     var executionConfig = streamingEnv.getConfig
-    val p = 18 
+    val p = 180 
     val maxP = 4096
     executionConfig.setParallelism(p)
     executionConfig.setMaxParallelism(maxP)
-    val k = 0 to 100 toList
-    val v = 20 to 120 toList
+    val k = 0 to 1000 toList
+    val v = 20 to 1020 toList
     val elements = k zip v
     val data = streamingEnv.fromCollection(elements)
     val keys = data.keyBy(0).flatMap(new RichFlatMapFunction[(Int, Int), (Int, Int)] {
