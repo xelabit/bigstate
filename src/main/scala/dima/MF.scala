@@ -67,6 +67,7 @@ object MF {
         var distance = 0
         val fieldsArray = value.split(",")
         val uid = fieldsArray(1).toInt
+        val ingestion = System.currentTimeMillis()
         val iid = fieldsArray(2).toInt
         val userPartition = partitionId(uid, maxUId, workerParallelism)
         val itemPartition = partitionId(iid, maxIId, workerParallelism)
@@ -258,7 +259,8 @@ object MF {
 //        val timestamp = formatter.parseDateTime(fieldsArray(0)).getMillis
 //        val timestamp = 1464882616000L + x
 //        x += 1
-        val r = Rating(key, uid, iid, fieldsArray(4).toInt, timestamp, userPartition, itemPartition, fieldsArray(3))
+        val r = Rating(key, uid, iid, fieldsArray(4).toInt, timestamp, userPartition, itemPartition, fieldsArray(3),
+                       ingestion)
         if (r.userPartition != r.itemPartition) {
           distance = r.itemPartition - r.userPartition
           if (distance < 0) distance += MF.workerParallelism
@@ -368,8 +370,12 @@ object MF {
 
 class SortSubstratums extends RichWindowFunction[(Rating, D), (Rating, W), Int, TimeWindow] {
 
-  override def apply(key: Int, window: TimeWindow, input: Iterable[(Rating, D)], out: Collector[(Rating, W)]): Unit =
+  override def apply(key: Int, window: TimeWindow, input: Iterable[(Rating, D)], out: Collector[(Rating, W)]): Unit = {
+    val lastRecord = input.last
+    val latency = System.currentTimeMillis() - lastRecord._1.ingestionTime
+    println(s"Latency: $latency")
     input.toList.sortWith(_._2 < _._2).map(x => out.collect(x._1, window.getStart))
+  }
 }
 
 class BoundedOutOfOrdernessGenerator extends AssignerWithPeriodicWatermarks[(Rating, D)] {

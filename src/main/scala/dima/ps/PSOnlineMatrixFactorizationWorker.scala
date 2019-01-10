@@ -75,7 +75,7 @@ class PSOnlineMatrixFactorizationWorker(numFactors: Int, rangeMin: Double, range
         var randomItemId = itemIds(Random.nextInt(itemIds.size))
         while (seenSet contains randomItemId) randomItemId = itemIds(Random.nextInt(itemIds.size))
         ratingBuffer(randomItemId).enqueue((Rating(data._1.key, data._1.user, randomItemId, 0, data._1.timestamp,
-          data._1.userPartition, data._1.itemPartition, data._1.label), data._2))
+          data._1.userPartition, data._1.itemPartition, data._1.label, 0), data._2))
         ps.pull(randomItemId, partitionId(randomItemId, maxItemId, parallelism))
       }
       ratingBuffer.getOrElseUpdate(
