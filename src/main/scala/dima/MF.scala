@@ -29,16 +29,16 @@ class MF {
 }
 
 object MF {
-  val numFactors = 25
+  val numFactors = 200
   val rangeMin: Double = -0.1
   val rangeMax = 0.1
   val userMemory = 128
   val negativeSampleRate = 9
   val maxUId = 521684
   val maxIId = 2299712
-  val workerParallelism = 18
-  val psParallelism = 18
-  val learningRate = 0.03
+  val workerParallelism = 48
+  val psParallelism = 48
+  val learningRate = 0.01
   val pullLimit = 1500
   val iterationWaitTime = 10000
   private val log = LoggerFactory.getLogger(classOf[MF])
@@ -47,7 +47,7 @@ object MF {
     val input_file_name = args(0)
     val env: StreamExecutionEnvironment = StreamExecutionEnvironment.getExecutionEnvironment
     env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
-    env.setParallelism(18)
+    env.setParallelism(48)
     env.setMaxParallelism(4096)
 
     // Kafka consumer
@@ -75,11 +75,17 @@ object MF {
         if (itemPartition == -1) println(s"iid $iid")
         val key = userPartition match {
           case 0 => 4
-          case 1 => 12
-          case 2 => 11
-          case 3 => 0
-          case 4 => 2
-          case 5 => 1
+          case 1 => 10
+          case 2 => 22
+          case 3 => 12
+          case 4 => 26
+          case 5 => 11
+          case 6 => 9
+          case 7 => 0
+          case 8 => 2
+          case 9 => 6
+          case 10 => 42
+          case 11 => 1
         }
         val timestamp = fieldsArray(6).toLong
 //        val timestamp = formatter.parseDateTime(fieldsArray(0)).getMillis
@@ -197,10 +203,11 @@ object MF {
 class SortSubstratums extends RichWindowFunction[(Rating, D), (Rating, W), Int, TimeWindow] {
 
   override def apply(key: Int, window: TimeWindow, input: Iterable[(Rating, D)], out: Collector[(Rating, W)]): Unit = {
+    input.toList.sortWith(_._2 < _._2).map(x => out.collect(x._1, window.getStart))
     val lastRecord = input.last
     val latency = System.currentTimeMillis() - lastRecord._1.ingestionTime
-    println(s"Latency: $latency")
-    input.toList.sortWith(_._2 < _._2).map(x => out.collect(x._1, window.getStart))
+    println(s"$latency")
+//    input.toList.sortWith(_._2 < _._2).map(x => out.collect(x._1, window.getStart))
   }
 }
 
